@@ -4,3 +4,19 @@
 06.04. 14:30-17:00 Kino
 06.04. 18:00-19:00 Essen
 06.04. 19:00-21:00 Band
+
+07.04.  08:00-08:25 Sync Christoph
+07.04.  08:30-08:45 Sync Fabian
+07.04.  09:00-09:25 Monthly Sync all between S/4 HANA Product Team and ECS
+07.04.  09:30-09:45 Weekly sync on SLOCON brownfield
+07.04.  11:00-11:25 SL Toolset for Cloud 2604 Handover to Validation
+07.04.  13:00-13:25 Sync on SLV Request for Landscapes
+07.04.  13:30-13:55 SL Toolset program Team & Delivery Meeting
+07.04.  14:00-14:25 Sync Daniel
+07.04.  14:30-14:55 Sync Kristin
+07.04.  15:00-15:25 Sync Martin
+07.04.  16:00-16:25 Sovereign Cloud SLOCON Install
+
+
+
+

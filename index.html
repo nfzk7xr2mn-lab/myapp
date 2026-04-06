@@ -3,60 +3,55 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>myapp</title>
+    <title>Mein Fokus Dashboard</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;900&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
-
     <header>
         <div id="clock">00:00</div>
         <div id="date-string">Lade Datum...</div>
-        <button class="action-button" onclick="toggleSettings()">⚙ Zeiten & Namen</button>
+        <div id="phase-task">Lade Phase...</div>
     </header>
 
-    <main class="dashboard-grid">
-        <div class="card">
-            <h2>Impuls</h2>
-            <p id="phase-task">Warten auf Zeit...</p>
-            <button class="action-button" onclick="logAction('Impuls bestätigt')">Fokus</button>
-        </div>
-
-        <div class="card">
-            <h2>Kalender</h2>
-            <p id="cal-info">KW -- | Day</p>
-            <div style="display: flex; gap: 5px; flex-wrap: wrap;">
-                <a href="https://outlook.office.com/calendar/view/day" target="_blank" class="action-button" style="text-decoration:none;">Outlook</a>
-                <button class="action-button" onclick="openWeeklyScreenshot()">Arbeitstag</button>
+    <main class="dashboard">
+        <section class="card" id="cal-card">
+            <h3>Termine & Zeitplan</h3>
+            <div id="cal-info"></div>
+            <div style="display: flex; gap: 10px; margin-top: 15px;">
+                <a href="https://outlook.office.com/calendar/view/day" target="_blank" class="action-button">Outlook</a>
+                <button class="action-button" onclick="openWeeklyScreenshot()">Wochenplan</button>
             </div>
+        </section>
+
+        <section class="card" id="impulse-card">
+            <h3>Fokus & Impulse</h3>
             <div id="content-box"></div>
-        </div>
+        </section>
 
-        <div class="card">
-           <h2>Abschluß</h2>
-           <div id="action-item-list" style="font-size: 0.85rem; text-align: left; margin-bottom: 10px; min-height: 50px;">Keine Action-Items</div>
-           <button class="action-button" onclick="logAction('Review erledigt')">Review</button>
-        </div>
-
-        <div class="card">
-            <h2>Elan</h2>
-            <p>5 Min. Mobilisation.</p>
-            <button class="action-button" onclick="logAction('Elan-Einheit')">Start</button>
-        </div>
+        <section class="card" id="action-card">
+            <h3>Tagesziele & Progress</h3>
+            <div id="action-item-list"></div>
+        </section>
     </main>
 
-    <div id="screenshot-modal" onclick="this.style.display='none'" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.9); z-index:1000; cursor:pointer; align-items:center; justify-content:center; flex-direction:column;">
-        <img id="weekly-img" src="" style="width:95%; max-height:90%; object-fit:contain; border-radius:10px; box-shadow:0 0 30px rgba(0,0,0,0.5);">
-        <p style="color:white; margin-top:15px; font-family:sans-serif; font-size:0.8rem;">Klicken zum Schließen</p>
+    <nav class="nav-buttons">
+        <button onclick="openWeeklyScreenshot()">Plan</button>
+        <button onclick="logAction('Review gestartet')">Review</button>
+        <button onclick="toggleFocus()">Fokus</button>
+        <button onclick="toggleSettings()">⚙️</button>
+    </nav>
+
+    <div id="screenshot-modal" onclick="this.style.display='none'">
+        <img id="weekly-img" src="">
     </div>
 
     <div id="settings-panel">
-        <h2 style="color:var(--text-main)">Einstellungen</h2>
+        <h3 style="color:white; margin-bottom:15px;">Einstellungen</h3>
         <div id="settings-list"></div>
-        <button class="action-button" onclick="saveSettings()" style="width:100%; margin-top:20px;">Einstellungen speichern</button>
+        <button class="action-button" onclick="toggleSettings()" style="width:100%;">Schließen</button>
     </div>
 
     <script src="script.js"></script>
 </body>
 </html>
- 
- 

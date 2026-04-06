@@ -1,138 +1,119 @@
-// ==========================================
-// 1. INITIALISIERUNG
-// ==========================================
-let phases = []; // Wird aus JSON geladen
-let appointments = "";
-let actionItems = "";
-let fullData = {}; // Speichert die komplette content.json
+let phases = [], appointments = "", actionItems = "", fullData = {};
 let checkedStates = JSON.parse(localStorage.getItem('myapp_checked_states')) || {};
-let currentPhaseGlobal = null;
 
-// ==========================================
-// 2. DATEN LADEN
-// ==========================================
 async function loadAllData() {
     const v = Date.now();
     try {
-        // Content & Phasen JSON laden
         const cRes = await fetch(`content.json?v=${v}`);
-        if (cRes.ok) {
-            fullData = await cRes.json();
-            phases = fullData.phases; // Phasen aus der JSON zuweisen
-        }
+        if (!cRes.ok) throw new Error();
+        fullData = await cRes.json();
+        phases = fullData.phases || [];
 
         const tRes = await fetch(`termine.txt?v=${v}`);
         if (tRes.ok) appointments = await tRes.text();
-        
+
         const aRes = await fetch(`actions.txt?v=${v}`);
         if (aRes.ok) actionItems = await aRes.text();
-        
+
+        updateApp();
     } catch (e) {
-        console.error("Datenfehler:", e);
+        document.getElementById('phase-task').innerHTML = `<span style="color:red;">JSON FEHLER!</span>`;
     }
-    updateApp();
 }
 
-// ==========================================
-// 3. HAUPTFUNKTION
-// ==========================================
 function updateApp() {
-    if (phases.length === 0) return; // Warten bis Daten da sind
-
+    if (!phases.length) return;
     const now = new Date();
     const currentTime = now.getHours().toString().padStart(2, '0') + ":" + now.getMinutes().toString().padStart(2, '0');
 
-    // Zeit & Datum
     document.getElementById('clock').innerText = currentTime;
     document.getElementById('date-string').innerText = now.toLocaleDateString('de-DE', { weekday: 'long', day: '2-digit', month: 'long' });
-    
-    // KW Berechnung
+
+    // Phase ermitteln
+    const sorted = [...phases].sort((a, b) => a.time.localeCompare(b.time));
+    let idx = sorted.length - 1;
+    for (let i = 0; i < sorted.length; i++) { if (currentTime >= sorted[i].time) idx = i; }
+    const current = sorted[idx];
+
+    document.body.className = current.css;
+    document.getElementById('phase-task').innerText = current.name;
+
+    // Termine (Heutige filtern)
+    const todayStr = now.getDate().toString().padStart(2, '0') + "." + (now.getMonth() + 1).toString().padStart(2, '0') + ".";
+    const appLines = appointments.split('\n').filter(l => l.trim().startsWith(todayStr));
+    document.getElementById('cal-info').innerHTML = appLines.map(l => `<div class="cal-entry" style="font-size:0.85rem;">${l.substring(7)}</div>`).join('') || "Keine Termine heute";
+
+    // Impulse
+    const c = fullData.content[current.id];
+    if (c) {
+        document.getElementById('content-box').innerHTML = `
+            <p style="font-size:0.9rem; margin-bottom:15px; font-style:italic;">"${c.tip}"</p>
+            ${c.sport ? `<a href="${c.sport}" target="_blank" class="impulse-link">🏃 Sport</a>` : ''}
+            ${c.learn ? `<a href="${c.learn}" target="_blank" class="impulse-link" style="background:rgba(255,255,255,0.1); color:white; margin-left:5px;">📖 Lernen</a>` : ''}
+        `;
+    }
+
+    // Progress & Tasks
+    const lines = actionItems.split('\n').filter(l => l.trim().includes('|'));
+    let done = 0;
+    const tasksHtml = lines.map(line => {
+        const p = line.split('|').map(x => x.trim());
+        const isChecked = checkedStates[line] || (p[3] && p[3].toLowerCase() === 'x');
+        if (isChecked) done++;
+        return `
+            <div style="display:flex; align-items:center; gap:10px; margin-bottom:8px; opacity:${isChecked?0.4:1}">
+                <input type="checkbox" ${isChecked?'checked':''} onclick="toggleCheck('${line.replace(/'/g, "\\'")}')">
+                <span style="font-size:0.85rem; ${isChecked?'text-decoration:line-through':''}">${p[2]}</span>
+            </div>`;
+    }).join('');
+
+    const perc = lines.length ? Math.round((done / lines.length) * 100) : 0;
+    document.getElementById('action-item-list').innerHTML = `
+        <div class="progress-text">${perc}%</div>
+        <div class="progress-container"><div class="progress-bar" style="width:${perc}%"></div></div>
+        ${tasksHtml}
+    `;
+}
+
+function toggleCheck(k) { checkedStates[k] = !checkedStates[k]; localStorage.setItem('myapp_checked_states', JSON.stringify(checkedStates)); updateApp(); }
+function toggleFocus() { document.body.classList.toggle('focus-mode'); }
+function toggleSettings() { const s = document.getElementById('settings-panel'); s.style.display = s.style.display === 'block' ? 'none' : 'block'; }
+// ==========================================
+// DYNAMISCHE WOCHENPLAN-LOGIK (KW-basiert)
+// ==========================================
+function openWeeklyScreenshot() {
+    const modal = document.getElementById('screenshot-modal');
+    const img = document.getElementById('weekly-img');
+    const now = new Date();
+
+    // 1. Kalenderwoche berechnen (ISO-Standard)
     const tempDate = new Date(now.valueOf());
     const dayNum = (now.getDay() + 6) % 7;
     tempDate.setDate(tempDate.getDate() - dayNum + 3);
-    const kw = 1 + Math.ceil((tempDate.valueOf() - new Date(tempDate.getFullYear(), 0, 4).valueOf()) / 604800000);
-
-    // Phasen-Logik
-    const sortedPhases = [...phases].sort((a, b) => a.time.localeCompare(b.time));
-    let currentIndex = sortedPhases.length - 1;
-    for (let i = 0; i < sortedPhases.length; i++) {
-        if (currentTime >= sortedPhases[i].time) currentIndex = i;
+    const firstThursday = tempDate.valueOf();
+    tempDate.setMonth(0, 1);
+    if (tempDate.getDay() !== 4) {
+        tempDate.setMonth(0, 1 + ((4 - tempDate.getDay()) + 7) % 7);
     }
-    currentPhaseGlobal = sortedPhases[currentIndex];
-    const nextPhase = sortedPhases[(currentIndex + 1) % sortedPhases.length];
+    const kw = 1 + Math.ceil((firstThursday - tempDate) / 604800000);
 
-    // Design anpassen
-    document.body.className = currentPhaseGlobal.css;
-    document.getElementById('phase-task').innerText = currentPhaseGlobal.name;
+    // 2. Bildpfad setzen (z.B. "15.png")
+    // WICHTIG: Die Datei muss exakt so heißen wie die Zahl!
+    img.src = `${kw}.png`; 
 
-    // --- KALENDER ANZEIGE ---
-    const todayStr = now.getDate().toString().padStart(2, '0') + "." + (now.getMonth() + 1).toString().padStart(2, '0') + ".";
-    const appLines = appointments.split('\n').filter(l => l.trim().startsWith(todayStr));
-    
-    let running = null, upcoming = [], nextP = null;
-    appLines.forEach(line => {
-        const timePart = line.substring(7, 18).trim(); 
-        const startTime = timePart.split('-')[0];
-        const isNextBeforeCurrent = nextPhase.time < currentPhaseGlobal.time;
-        const inCurrent = !isNextBeforeCurrent ? (startTime >= currentPhaseGlobal.time && startTime < nextPhase.time) : (startTime >= currentPhaseGlobal.time || startTime < nextPhase.time);
+    // 3. Fehler abfangen (Falls das Bild für die KW noch nicht existiert)
+    img.onerror = function() {
+        console.error("Wochenplan für KW " + kw + " nicht gefunden.");
+        // Optional: Ein Standardbild laden, falls KW-Bild fehlt:
+        // img.src = "default.png"; 
+    };
 
-        if (inCurrent) {
-            if (startTime <= currentTime) running = line.substring(7);
-            else upcoming.push(line.substring(7));
-        } else if (startTime >= nextPhase.time && !nextP) {
-            nextP = line.substring(7);
-        }
-    });
-
-    const calInfo = document.getElementById('cal-info');
-    if (calInfo) {
-        let html = `<div style="opacity:0.5; font-size:0.75rem; margin-bottom:10px;">KW ${kw} | ${now.toLocaleDateString('de-DE', {month:'long'})}</div>`;
-        if (running) html += `<div class="cal-entry" style="border-left-color:var(--accent-gold);"><small>JETZT</small><br><b>${running}</b></div>`;
-        if (upcoming.length > 0) html += `<div class="cal-entry"><small>DEMNÄCHST</small><br>${upcoming.join('<br>')}</div>`;
-        calInfo.innerHTML = html;
-    }
-
-    // --- IMPULSE AUS CONTENT-SEKTION ---
-    const contentBox = document.getElementById('content-box');
-    if (contentBox && fullData.content && fullData.content[currentPhaseGlobal.id]) {
-        const c = fullData.content[currentPhaseGlobal.id];
-        contentBox.innerHTML = `
-            <div style="margin-top:15px; padding:12px; background:rgba(255,255,255,0.05); border-radius:8px;">
-                <p style="font-size:0.8rem; margin-bottom:10px;">💡 ${c.tip}</p>
-                <div style="display:flex; gap:10px;">
-                    ${c.sport ? `<a href="${c.sport}" target="_blank" class="impulse-link">🏃 Sport</a>` : ''}
-                    ${c.learn ? `<a href="${c.learn}" target="_blank" class="impulse-link">📖 Lernen</a>` : ''}
-                </div>
-            </div>`;
-    }
-
-    // --- RÜCKBLICK (Actions) ---
-    const actionDisplay = document.getElementById('action-item-list');
-    if (actionDisplay) {
-        const lines = actionItems.split('\n').filter(l => l.trim().includes('|'));
-        let actionHtml = "";
-        lines.forEach((line) => {
-            const parts = line.split('|').map(p => p.trim());
-            let isChecked = (parts.length >= 4 && (parts[3].toLowerCase() === 'erledigt' || parts[3].toLowerCase() === 'x')) || checkedStates[line];
-            const style = isChecked ? 'text-decoration:line-through; opacity:0.4;' : '';
-            actionHtml += `
-                <div style="display:flex; align-items:center; gap:8px; margin-bottom:5px;">
-                    <input type="checkbox" ${isChecked ? 'checked' : ''} onclick="toggleCheck('${line.replace(/'/g, "\\'")}')">
-                    <span style="font-size:0.75rem; ${style}">${parts[2]}</span>
-                </div>`;
-        });
-        actionDisplay.innerHTML = actionHtml || "Keine Aufgaben";
-    }
+    // 4. Anzeigen
+    modal.style.display = 'flex';
 }
 
-// Checkbox-Logik
-function toggleCheck(lineKey) {
-    checkedStates[lineKey] = !checkedStates[lineKey];
-    localStorage.setItem('myapp_checked_states', JSON.stringify(checkedStates));
-    updateApp();
-}
+function logAction(m) { alert(m); }
 
-// Initialer Start
 loadAllData();
-setInterval(updateApp, 5000); 
-setInterval(loadAllData, 30000); 
+setInterval(updateApp, 5000);
+ 
