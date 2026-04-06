@@ -16,32 +16,49 @@ let phases = JSON.parse(localStorage.getItem('myapp_phases')) || [
 // 2. Hauptfunktion: Uhrzeit, Datum und Phasen-Logik aktualisieren
 function updateApp() {
     const now = new Date();
+    
+    // 1. Uhrzeit formatieren (HH:mm)
     const hrs = now.getHours().toString().padStart(2, '0');
     const min = now.getMinutes().toString().padStart(2, '0');
     const currentTime = `${hrs}:${min}`;
+
+    // 2. Datum für die Header-Anzeige
+    const dateOptions = { weekday: 'long', day: '2-digit', month: 'long' };
+    document.getElementById('clock').innerText = `${hrs}:${min}`;
+    document.getElementById('date-string').innerText = now.toLocaleDateString('de-DE', dateOptions);
+
+    // 3. Kalenderwoche berechnen (ISO-8601 Standard)
+    const tempDate = new Date(now.valueOf());
+    const dayNum = (now.getDay() + 6) % 7;
+    tempDate.setDate(tempDate.getDate() - dayNum + 3);
+    const firstThursday = tempDate.valueOf();
+    tempDate.setMonth(0, 1);
+    if (tempDate.getDay() !== 4) {
+        tempDate.setMonth(0, 1 + ((4 - tempDate.getDay()) + 7) % 7);
+    }
+    const kw = 1 + Math.ceil((firstThursday - tempDate) / 604800000);
+    const aktuellerMonat = now.toLocaleDateString('de-DE', { month: 'long' });
+    
+    // Anzeige in der Kalender-Kachel aktualisieren
+    const calInfo = document.getElementById('cal-info');
+    if (calInfo) {
+        calInfo.innerText = `KW ${kw} | ${aktuellerMonat}`;
+    }
+
+    // 4. Phasen-Logik & Hintergrundfarbe
     const isWeekend = (now.getDay() === 6 || now.getDay() === 0);
-
-    // Uhrzeit und Datum im HTML setzen
-    document.getElementById('clock').innerText = now.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' });
-    document.getElementById('date-string').innerText = now.toLocaleDateString('de-DE', { weekday: 'long', day: '2-digit', month: 'long' });
-
-    // KW (Kalenderwoche) berechnen
-    const dateForKW = new Date(now.getTime());
-    dateForKW.setHours(0, 0, 0, 0);
-    dateForKW.setDate(dateForKW.getDate() + 3 - (dateForKW.getDay() + 6) % 7);
-    const week1 = new Date(dateForKW.getFullYear(), 0, 4);
-    const kw = 1 + Math.round(((dateForKW.getTime() - week1.getTime()) / 86400000 - 3 + (week1.getDay() + 6) % 7) / 7);
-    document.getElementById('cal-info').innerText = `KW ${kw} | ${now.toLocaleDateString('de-DE', {month: 'long'})}`;
-
-    // Phasen-Logik (Wochenende vs. Werktag)
     let currentPhase;
+
     if (isWeekend) {
-        document.body.className = 'phase-morning'; // Helles Design für Wochenende
+        // Am Wochenende nutzen wir ein neutrales/helles Design
+        document.body.className = 'phase-morning'; 
         document.getElementById('phase-task').innerText = "Wochenende genießen";
     } else {
-        // Finde die aktuell gültige Phase basierend auf der Uhrzeit
+        // Sortiere Phasen nach Zeit, um die aktuellste zu finden
         const sortedPhases = [...phases].sort((a, b) => a.time.localeCompare(b.time));
-        currentPhase = sortedPhases[sortedPhases.length - 1]; // Standard: letzte Phase vom Vortag
+        
+        // Standard: Falls vor der ersten Phase (z.B. nach Mitternacht), nimm die letzte (Schlafen)
+        currentPhase = sortedPhases[sortedPhases.length - 1]; 
 
         for (let ph of sortedPhases) {
             if (currentTime >= ph.time) {
@@ -49,10 +66,15 @@ function updateApp() {
             }
         }
 
+        // Hintergrundklasse am Body setzen und Text in der Impuls-Kachel ändern
         document.body.className = currentPhase.css;
-        document.getElementById('phase-task').innerText = currentPhase.name;
+        const taskElement = document.getElementById('phase-task');
+        if (taskElement) {
+            taskElement.innerText = currentPhase.name;
+        }
     }
 }
+
 
 // 3. Einstellungen-Panel umschalten (Anzeigen/Verbergen)
 function toggleSettings() {
