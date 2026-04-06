@@ -1,0 +1,51 @@
+:root {
+    --bg-color: #f0f2f1;
+    --text-main: #2c3e50;
+    --accent-gold: #c5a059;
+    --card-bg: rgba(255, 255, 255, 0.95);
+    --font-serif: 'Optima', 'Georgia', serif;
+}
+
+body {
+    font-family: 'Segoe UI', sans-serif;
+    transition: background-color 1s ease;
+    margin: 0; padding: 20px;
+    display: flex; flex-direction: column; align-items: center; min-height: 100vh;
+}
+
+header { text-align: center; margin-bottom: 20px; }
+#clock { font-family: var(--font-serif); font-size: 3.5rem; color: var(--text-main); margin: 0; }
+
+.dashboard-grid {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 15px; width: 100%; max-width: 900px;
+}
+
+.card {
+    background: var(--card-bg); border-radius: 15px; padding: 20px;
+    box-shadow: 0 4px 15px rgba(0,0,0,0.05); backdrop-filter: blur(5px);
+}
+
+.action-button {
+    background: transparent; border: 1px solid var(--accent-gold);
+    color: var(--accent-gold); padding: 8px 15px; border-radius: 20px;
+    text-transform: uppercase; font-size: 0.65rem; cursor: pointer;
+}
+
+#settings-panel {
+    display: none; background: white; position: fixed;
+    top: 50%; left: 50%; transform: translate(-50%, -50%);
+    width: 90%; max-width: 450px; padding: 25px; border-radius: 20px;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.3); z-index: 100;
+}
+
+.setting-row { display: flex; gap: 10px; margin-bottom: 10px; }
+
+/* Phasen-Farben */
+.phase-sleep { background-color: #2c3e50; color: #eee; }
+.phase-morning { background-color: #e8f4f8; }
+.phase-sport { background-color: #fdf2e9; }
+.phase-work { background-color: #f4f7f6; }
+.phase-break { background-color: #fef9e7; }
+.phase-evening { background-color: #f5eef8; }
+
