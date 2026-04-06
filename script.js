@@ -1,50 +1,48 @@
 // ==========================================
-// 1. DATEN INITIALISIEREN
+// 1. INITIALISIERUNG
 // ==========================================
-let phases = JSON.parse(localStorage.getItem('myapp_phases')) || [
-    { id: 'morning', time: '06:30', name: 'Aufstehen', css: 'phase-morning' },
-    { id: 'work', time: '08:00', name: 'Arbeiten', css: 'phase-work' },
-    { id: 'sleep', time: '22:30', name: 'Schlafen', css: 'phase-sleep' }
-];
-
+let phases = []; // Wird aus JSON geladen
 let appointments = "";
 let actionItems = "";
+let fullData = {}; // Speichert die komplette content.json
 let checkedStates = JSON.parse(localStorage.getItem('myapp_checked_states')) || {};
+let currentPhaseGlobal = null;
 
 // ==========================================
-// 2. EXTERNE DATEIEN LADEN (Über Live Server)
+// 2. DATEN LADEN
 // ==========================================
-async function loadExternalFiles() {
+async function loadAllData() {
+    const v = Date.now();
     try {
-        // Cache-Buster (?v=...) verhindert, dass der Browser alte Versionen der Textdateien anzeigt
-        const v = Date.now();
-        
+        // Content & Phasen JSON laden
+        const cRes = await fetch(`content.json?v=${v}`);
+        if (cRes.ok) {
+            fullData = await cRes.json();
+            phases = fullData.phases; // Phasen aus der JSON zuweisen
+        }
+
         const tRes = await fetch(`termine.txt?v=${v}`);
         if (tRes.ok) appointments = await tRes.text();
         
         const aRes = await fetch(`actions.txt?v=${v}`);
         if (aRes.ok) actionItems = await aRes.text();
         
-        console.log("Dateien erfolgreich geladen.");
     } catch (e) {
-        console.error("Fehler beim Laden der Dateien. Sicherstellen, dass 'Go Live' aktiv ist!", e);
-        // Fallback auf LocalStorage falls Server offline
-        appointments = localStorage.getItem('myapp_appointments') || "";
-        actionItems = localStorage.getItem('myapp_actions') || "";
+        console.error("Datenfehler:", e);
     }
     updateApp();
 }
 
 // ==========================================
-// 3. HAUPTFUNKTION (UPDATE-LOOP)
+// 3. HAUPTFUNKTION
 // ==========================================
 function updateApp() {
-    const now = new Date();
-    const hrs = now.getHours().toString().padStart(2, '0');
-    const min = now.getMinutes().toString().padStart(2, '0');
-    const currentTime = `${hrs}:${min}`;
+    if (phases.length === 0) return; // Warten bis Daten da sind
 
-    // Header-Daten
+    const now = new Date();
+    const currentTime = now.getHours().toString().padStart(2, '0') + ":" + now.getMinutes().toString().padStart(2, '0');
+
+    // Zeit & Datum
     document.getElementById('clock').innerText = currentTime;
     document.getElementById('date-string').innerText = now.toLocaleDateString('de-DE', { weekday: 'long', day: '2-digit', month: 'long' });
     
@@ -60,120 +58,81 @@ function updateApp() {
     for (let i = 0; i < sortedPhases.length; i++) {
         if (currentTime >= sortedPhases[i].time) currentIndex = i;
     }
-    const currentPhase = sortedPhases[currentIndex];
+    currentPhaseGlobal = sortedPhases[currentIndex];
     const nextPhase = sortedPhases[(currentIndex + 1) % sortedPhases.length];
 
-    document.body.className = currentPhase.css;
-    const phaseEl = document.getElementById('phase-task');
-    if(phaseEl) phaseEl.innerText = currentPhase.name;
+    // Design anpassen
+    document.body.className = currentPhaseGlobal.css;
+    document.getElementById('phase-task').innerText = currentPhaseGlobal.name;
 
-    // --- KALENDER LOGIK (Aus termine.txt) ---
+    // --- KALENDER ANZEIGE ---
     const todayStr = now.getDate().toString().padStart(2, '0') + "." + (now.getMonth() + 1).toString().padStart(2, '0') + ".";
     const appLines = appointments.split('\n').filter(l => l.trim().startsWith(todayStr));
     
     let running = null, upcoming = [], nextP = null;
     appLines.forEach(line => {
-        const time = line.substring(7, 12);
-        const isNextBeforeCurrent = nextPhase.time < currentPhase.time;
-        const inCurrent = !isNextBeforeCurrent ? (time >= currentPhase.time && time < nextPhase.time) : (time >= currentPhase.time || time < nextPhase.time);
+        const timePart = line.substring(7, 18).trim(); 
+        const startTime = timePart.split('-')[0];
+        const isNextBeforeCurrent = nextPhase.time < currentPhaseGlobal.time;
+        const inCurrent = !isNextBeforeCurrent ? (startTime >= currentPhaseGlobal.time && startTime < nextPhase.time) : (startTime >= currentPhaseGlobal.time || startTime < nextPhase.time);
 
         if (inCurrent) {
-            if (time <= currentTime) running = line.substring(7);
+            if (startTime <= currentTime) running = line.substring(7);
             else upcoming.push(line.substring(7));
-        } else if (time >= nextPhase.time && !nextP) {
+        } else if (startTime >= nextPhase.time && !nextP) {
             nextP = line.substring(7);
         }
     });
 
     const calInfo = document.getElementById('cal-info');
     if (calInfo) {
-        let html = `KW ${kw} | ${now.toLocaleDateString('de-DE', {month:'long'})}`;
-        if (running) html += `<div style="color:var(--accent-gold); font-weight:bold; margin-top:8px;">● JETZT: ${running}</div>`;
-        if (upcoming.length > 0) html += `<div style="font-size:0.8rem; opacity:0.8; margin-top:5px; padding-left:10px;">🕒 Später: ${upcoming.join(', ')}</div>`;
-        if (nextP) html += `<div style="margin-top:12px; border-top:1px solid rgba(255,255,255,0.1); padding-top:6px; font-size:0.75rem; opacity:0.6;">Danach: ${nextP}</div>`;
+        let html = `<div style="opacity:0.5; font-size:0.75rem; margin-bottom:10px;">KW ${kw} | ${now.toLocaleDateString('de-DE', {month:'long'})}</div>`;
+        if (running) html += `<div class="cal-entry" style="border-left-color:var(--accent-gold);"><small>JETZT</small><br><b>${running}</b></div>`;
+        if (upcoming.length > 0) html += `<div class="cal-entry"><small>DEMNÄCHST</small><br>${upcoming.join('<br>')}</div>`;
         calInfo.innerHTML = html;
     }
 
-    // --- RÜCKBLICK LOGIK (Aus actions.txt) ---
+    // --- IMPULSE AUS CONTENT-SEKTION ---
+    const contentBox = document.getElementById('content-box');
+    if (contentBox && fullData.content && fullData.content[currentPhaseGlobal.id]) {
+        const c = fullData.content[currentPhaseGlobal.id];
+        contentBox.innerHTML = `
+            <div style="margin-top:15px; padding:12px; background:rgba(255,255,255,0.05); border-radius:8px;">
+                <p style="font-size:0.8rem; margin-bottom:10px;">💡 ${c.tip}</p>
+                <div style="display:flex; gap:10px;">
+                    ${c.sport ? `<a href="${c.sport}" target="_blank" class="impulse-link">🏃 Sport</a>` : ''}
+                    ${c.learn ? `<a href="${c.learn}" target="_blank" class="impulse-link">📖 Lernen</a>` : ''}
+                </div>
+            </div>`;
+    }
+
+    // --- RÜCKBLICK (Actions) ---
     const actionDisplay = document.getElementById('action-item-list');
     if (actionDisplay) {
         const lines = actionItems.split('\n').filter(l => l.trim().includes('|'));
         let actionHtml = "";
         lines.forEach((line) => {
             const parts = line.split('|').map(p => p.trim());
-            
-            // Status: Entweder aus Datei (4. Spalte) ODER aus Browser-Klick
-            let isChecked = (parts.length >= 4 && (parts[3].toLowerCase() === 'erledigt' || parts[3].toLowerCase() === 'x')) 
-                            || checkedStates[line];
-
+            let isChecked = (parts.length >= 4 && (parts[3].toLowerCase() === 'erledigt' || parts[3].toLowerCase() === 'x')) || checkedStates[line];
             const style = isChecked ? 'text-decoration:line-through; opacity:0.4;' : '';
-            
             actionHtml += `
-                <div style="display:flex; align-items:center; gap:8px; margin-bottom:6px; background:rgba(255,255,255,0.05); padding:6px; border-radius:4px;">
-                    <input type="checkbox" ${isChecked ? 'checked' : ''} onclick="toggleCheck('${line.replace(/'/g, "\\'")}')" style="cursor:pointer; width:16px; height:16px;">
-                    <div style="font-size:0.75rem; ${style}">
-                        <small style="color:var(--accent-gold); display:block; font-size:0.6rem;">${parts[0]} - ${parts[1]}</small>
-                        ${parts[2]}
-                    </div>
+                <div style="display:flex; align-items:center; gap:8px; margin-bottom:5px;">
+                    <input type="checkbox" ${isChecked ? 'checked' : ''} onclick="toggleCheck('${line.replace(/'/g, "\\'")}')">
+                    <span style="font-size:0.75rem; ${style}">${parts[2]}</span>
                 </div>`;
         });
-        actionDisplay.innerHTML = actionHtml || "<span style='color:gray;'>Keine Aufgaben in actions.txt</span>";
+        actionDisplay.innerHTML = actionHtml || "Keine Aufgaben";
     }
 }
 
-// ==========================================
-// 4. FUNKTIONEN & EVENTS
-// ==========================================
-
+// Checkbox-Logik
 function toggleCheck(lineKey) {
     checkedStates[lineKey] = !checkedStates[lineKey];
     localStorage.setItem('myapp_checked_states', JSON.stringify(checkedStates));
     updateApp();
 }
 
-function toggleSettings() {
-    const p = document.getElementById('settings-panel');
-    p.style.display = (p.style.display === 'block') ? 'none' : 'block';
-    if (p.style.display === 'block') {
-        const areaStyle = "width:100%; height:70px; margin-bottom:10px; background:#fff; border-radius:5px; border:none; padding:8px; font-family:monospace; font-size:0.8rem; color:#333;";
-        document.getElementById('settings-list').innerHTML = `
-            <p style="font-size:0.6rem; color:orange; margin-bottom:5px;">Hinweis: Änderungen hier werden im Browser gecached. Dateien manuell in VS Code pflegen!</p>
-            <textarea id="appt-in" style="${areaStyle}">${appointments}</textarea>
-            <textarea id="action-in" style="${areaStyle}">${actionItems}</textarea>
-        ` + phases.map(ph => `<div style="display:flex; gap:5px; margin-bottom:5px;">
-            <input type="time" id="t-${ph.id}" value="${ph.time}" style="flex:1;">
-            <input type="text" id="n-${ph.id}" value="${ph.name}" style="flex:2;">
-        </div>`).join('');
-    }
-}
-
-function saveSettings() {
-    appointments = document.getElementById('appt-in').value;
-    actionItems = document.getElementById('action-in').value;
-    localStorage.setItem('myapp_appointments', appointments);
-    localStorage.setItem('myapp_actions', actionItems);
-    phases.forEach(ph => {
-        ph.time = document.getElementById('t-' + ph.id).value;
-        ph.name = document.getElementById('n-' + ph.id).value;
-    });
-    localStorage.setItem('myapp_phases', JSON.stringify(phases));
-    toggleSettings();
-    updateApp();
-}
-
-function openWeeklyScreenshot() {
-    const now = new Date();
-    const tempDate = new Date(now.valueOf());
-    const dayNum = (now.getDay() + 6) % 7;
-    tempDate.setDate(tempDate.getDate() - dayNum + 3);
-    const kw = 1 + Math.ceil((tempDate.valueOf() - new Date(tempDate.getFullYear(), 0, 4).valueOf()) / 604800000);
-    document.getElementById('weekly-img').src = `${kw}.png`;
-    document.getElementById('screenshot-modal').style.display = 'flex';
-}
-
-function logAction(msg) { console.log(msg); alert(msg); }
-
-// INITIALER START
-loadExternalFiles();
-setInterval(updateApp, 5000); // Alle 5 Sek. UI Update
-setInterval(loadExternalFiles, 30000); // Alle 30 Sek. Dateien neu einlesen
+// Initialer Start
+loadAllData();
+setInterval(updateApp, 5000); 
+setInterval(loadAllData, 30000); 
