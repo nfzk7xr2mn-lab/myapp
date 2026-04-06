@@ -20,16 +20,22 @@
             <p id="phase-task">Warten auf Zeit...</p>
             <button class="action-button" onclick="logAction('Impuls bestätigt')">Fokus</button>
         </div>
+
         <div class="card">
             <h2>Kalender</h2>
-            <p id="cal-info">KW --</p>
-            <button class="action-button">Details</button>
+            <p id="cal-info">KW -- | Day</p>
+            <div style="display: flex; gap: 5px; flex-wrap: wrap;">
+                <a href="https://outlook.office.com/calendar/view/day" target="_blank" class="action-button" style="text-decoration:none;">Outlook</a>
+                <button class="action-button" onclick="openWeeklyScreenshot()">Arbeitstag</button>
+            </div>
         </div>
+
         <div class="card">
-            <h2>Resümee</h2>
-            <p>Action-Items sichten.</p>
-            <button class="action-button">Review</button>
+           <h2>Resümee</h2>
+           <div id="action-item-list" style="font-size: 0.85rem; text-align: left; margin-bottom: 10px; min-height: 50px;">Keine Action-Items</div>
+           <button class="action-button" onclick="logAction('Review erledigt')">Review</button>
         </div>
+
         <div class="card">
             <h2>Elan</h2>
             <p>5 Min. Mobilisation.</p>
@@ -37,13 +43,19 @@
         </div>
     </main>
 
+    <div id="screenshot-modal" onclick="this.style.display='none'" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.9); z-index:1000; cursor:pointer; align-items:center; justify-content:center; flex-direction:column;">
+        <img id="weekly-img" src="" style="width:95%; max-height:90%; object-fit:contain; border-radius:10px; box-shadow:0 0 30px rgba(0,0,0,0.5);">
+        <p style="color:white; margin-top:15px; font-family:sans-serif; font-size:0.8rem;">Klicken zum Schließen</p>
+    </div>
+
     <div id="settings-panel">
-        <h2 style="color:var(--text-main)">Deine Phasen</h2>
-        <div id="settings-list">
-            </div>
+        <h2 style="color:var(--text-main)">Einstellungen</h2>
+        <div id="settings-list"></div>
         <button class="action-button" onclick="saveSettings()" style="width:100%; margin-top:20px;">Einstellungen speichern</button>
     </div>
 
     <script src="script.js"></script>
 </body>
 </html>
+ 
+ 
