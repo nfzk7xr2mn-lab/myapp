@@ -4,121 +4,20 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>myapp</title>
-    <style>
-        :root {
-            --bg-color: #f0f2f1;
-            --text-main: #2c3e50;
-            --accent-gold: #c5a059;
-            --accent-sage: #8da290;
-            --card-bg: rgba(255, 255, 255, 0.95);
-            --font-serif: 'Optima', 'Georgia', serif;
-        }
-
-        body {
-            font-family: 'Segoe UI', sans-serif;
-            transition: background-color 1s ease;
-            margin: 0;
-            padding: 20px;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            min-height: 100vh;
-        }
-
-        header { text-align: center; margin-bottom: 30px; }
-        #clock { font-family: var(--font-serif); font-size: 3.5rem; color: var(--text-main); margin: 0; }
-        #date-string { font-size: 1.1rem; letter-spacing: 1px; margin-top: 5px; }
-
-        .dashboard-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-            gap: 15px;
-            width: 100%;
-            max-width: 900px;
-        }
-
-        .card {
-            background: var(--card-bg);
-            border-radius: 15px;
-            padding: 20px;
-            box-shadow: 0 4px 15px rgba(0,0,0,0.05);
-            backdrop-filter: blur(5px);
-            display: flex;
-            flex-direction: column;
-            justify-content: space-between;
-        }
-
-        h2 {
-            font-family: var(--font-serif);
-            font-size: 0.85rem;
-            text-transform: uppercase;
-            letter-spacing: 2px;
-            color: var(--accent-gold);
-            margin: 0 0 10px 0;
-            border-bottom: 1px solid rgba(0,0,0,0.05);
-            padding-bottom: 8px;
-        }
-
-        .action-button {
-            background: transparent;
-            border: 1px solid var(--accent-gold);
-            color: var(--accent-gold);
-            padding: 6px 12px;
-            border-radius: 20px;
-            text-transform: uppercase;
-            font-size: 0.65rem;
-            cursor: pointer;
-            transition: 0.3s;
-            margin-top: 10px;
-        }
-
-        .action-button:hover { background: var(--accent-gold); color: white; }
-
-        /* Einstellungen Panel */
-        #settings-panel {
-            display: none;
-            background: var(--card-bg);
-            position: fixed;
-            top: 50%;
-            left: 50%;
-            transform: translate(-50%, -50%);
-            width: 90%;
-            max-width: 400px;
-            padding: 30px;
-            border-radius: 20px;
-            box-shadow: 0 20px 50px rgba(0,0,0,0.2);
-            z-index: 100;
-        }
-
-        .settings-input {
-            width: 100%;
-            margin-bottom: 10px;
-            padding: 8px;
-            border: 1px solid #ddd;
-            border-radius: 5px;
-        }
-
-        /* Phasen-Farben */
-        .phase-sleep { background-color: #2c3e50; color: #eee; }
-        .phase-morning { background-color: #e8f4f8; }
-        .phase-sport { background-color: #fdf2e9; }
-        .phase-work { background-color: #f4f7f6; }
-        .phase-break { background-color: #fef9e7; }
-        .phase-evening { background-color: #f5eef8; }
-    </style>
+    <link rel="stylesheet" href="style.css">
 </head>
 <body>
 
     <header>
         <div id="clock">00:00</div>
-        <div id="date-string">Wochentag, 01. Januar</div>
-        <button class="action-button" onclick="toggleSettings()" style="margin-top:10px;">⚙ Einstellungen</button>
+        <div id="date-string">Lade Datum...</div>
+        <button class="action-button" onclick="toggleSettings()">⚙ Zeiten & Namen</button>
     </header>
 
     <main class="dashboard-grid">
         <div class="card">
             <h2>Impuls</h2>
-            <p id="phase-task">Lädt...</p>
+            <p id="phase-task">Warten auf Zeit...</p>
             <button class="action-button" onclick="logAction('Impuls bestätigt')">Fokus</button>
         </div>
         <div class="card">
@@ -133,73 +32,18 @@
         </div>
         <div class="card">
             <h2>Elan</h2>
-            <p>Zeit für Bewegung.</p>
+            <p>5 Min. Mobilisation.</p>
             <button class="action-button" onclick="logAction('Elan-Einheit')">Start</button>
         </div>
     </main>
 
     <div id="settings-panel">
-        <h2>Phasen definieren</h2>
-        <label>Arbeits-Titel:</label>
-        <input type="text" id="set-work-name" class="settings-input" value="Konzentriert arbeiten">
-        <label>Sport-Titel:</label>
-        <input type="text" id="set-sport-name" class="settings-input" value="Frühsport-Impuls">
-        <label>Abend-Titel:</label>
-        <input type="text" id="set-evening-name" class="settings-input" value="Hobby & Lernen">
-        
-        <button class="action-button" onclick="saveSettings()">Speichern & Schließen</button>
+        <h2 style="color:var(--text-main)">Deine Phasen</h2>
+        <div id="settings-list">
+            </div>
+        <button class="action-button" onclick="saveSettings()" style="width:100%; margin-top:20px;">Einstellungen speichern</button>
     </div>
 
-    <script>
-        // Standard-Einstellungen
-        let config = JSON.parse(localStorage.getItem('myapp_config')) || {
-            workName: "Konzentriert arbeiten",
-            sportName: "Frühsport-Impuls",
-            eveningName: "Hobby & Lernen"
-        };
-
-        function toggleSettings() {
-            const panel = document.getElementById('settings-panel');
-            panel.style.display = panel.style.display === 'block' ? 'none' : 'block';
-        }
-
-        function saveSettings() {
-            config.workName = document.getElementById('set-work-name').value;
-            config.sportName = document.getElementById('set-sport-name').value;
-            config.eveningName = document.getElementById('set-evening-name').value;
-            localStorage.setItem('myapp_config', JSON.stringify(config));
-            toggleSettings();
-            updateApp();
-        }
-
-        function updateApp() {
-            const now = new Date();
-            const hrs = now.getHours();
-            const min = now.getMinutes();
-            const time = hrs * 100 + min;
-
-            document.getElementById('clock').innerText = now.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' });
-            document.getElementById('date-string').innerText = now.toLocaleDateString('de-DE', { weekday: 'long', day: '2-digit', month: 'long' });
-
-            let phase = "phase-work";
-            let task = config.workName;
-
-            // Zeit-Logik (vereinfacht für das Beispiel)
-            if (time < 630) { phase = "phase-sleep"; task = "Ruhephase"; }
-            else if (time < 745) { phase = "phase-morning"; task = "Aufstehen"; }
-            else if (time < 800) { phase = "phase-sport"; task = config.sportName; }
-            else if (time < 1130) { phase = "phase-work"; task = config.workName; }
-            else if (time < 1300) { phase = "phase-break"; task = "Mittag"; }
-            else if (time < 2200) { phase = "phase-evening"; task = config.eveningName; }
-            else { phase = "phase-sleep"; task = "Nachtruhe"; }
-
-            document.body.className = phase;
-            document.getElementById('phase-task').innerText = task;
-        }
-
-        setInterval(updateApp, 10000);
-        updateApp();
-    </script>
+    <script src="script.js"></script>
 </body>
 </html>
-
