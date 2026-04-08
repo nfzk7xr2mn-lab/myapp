@@ -1,57 +1,103 @@
 <!DOCTYPE html>
 <html lang="de">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Mein Fokus Dashboard</title>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;900&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="style.css">
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Mein Fokus Dashboard</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="style.css" />
 </head>
 <body>
-    <header>
-        <div id="clock">00:00</div>
-        <div id="date-string">Lade Datum...</div>
-        <div id="phase-task">Lade Phase...</div>
+  <div id="app">
+
+    <!-- HEADER -->
+    <header id="header">
+      <div id="header-left">
+        <div id="clock"></div>
+        <div id="date-label"></div>
+      </div>
+      <div id="phase-badge"></div>
     </header>
 
-    <main class="dashboard">
-        <section class="card" id="cal-card">
-            <h3>Termine & Zeitplan</h3>
-            <div id="cal-info"></div>
-            <div style="display: flex; gap: 10px; margin-top: 15px;">
-                <a href="https://outlook.office.com/calendar/view/day" target="_blank" class="action-button">Outlook</a>
-                <button class="action-button" onclick="openWeeklyScreenshot()">Wochenplan</button>
-            </div>
-        </section>
+    <!-- MAIN TILES -->
+    <main id="tiles">
 
-        <section class="card" id="impulse-card">
-            <h3>Fokus & Impulse</h3>
-            <div id="content-box"></div>
-        </section>
+      <!-- TILE 1: KALENDER -->
+      <section class="tile" id="tile-kalender">
+        <div class="tile-header">
+          <span class="tile-icon">📅</span>
+          <span class="tile-title">Kalender</span>
+          <span class="tile-sub" id="cal-date"></span>
+        </div>
+        <div class="tile-body" id="cal-body"></div>
+      </section>
 
-        <section class="card" id="action-card">
-            <h3>Tagesziele & Progress</h3>
-            <div id="action-item-list"></div>
-        </section>
+      <!-- TILE 2: FOKUS -->
+      <section class="tile" id="tile-fokus">
+        <div class="tile-header">
+          <span class="tile-icon">🎯</span>
+          <span class="tile-title">Fokus</span>
+          <span class="tile-sub" id="fokus-kategorie"></span>
+        </div>
+        <div class="tile-body" id="fokus-body"></div>
+        <div class="tile-footer">
+          <button class="btn-ghost" id="btn-add-learn">+ Link hinzufügen</button>
+        </div>
+      </section>
+
+      <!-- TILE 3: ACTIONS -->
+      <section class="tile" id="tile-actions">
+        <div class="tile-header">
+          <span class="tile-icon">⚡</span>
+          <span class="tile-title">Actions</span>
+          <span class="tile-sub" id="actions-count"></span>
+        </div>
+        <div class="tile-body" id="actions-body"></div>
+        <div class="tile-footer">
+          <button class="btn-ghost" id="btn-add-action">+ Action erfassen</button>
+        </div>
+      </section>
+
     </main>
 
-    <nav class="nav-buttons">
-        <button onclick="openWeeklyScreenshot()">Plan</button>
-        <button onclick="logAction('Review gestartet')">Review</button>
-        <button onclick="toggleFocus()">Fokus</button>
-        <button onclick="toggleSettings()">⚙️</button>
-    </nav>
+  </div>
 
-    <div id="screenshot-modal" onclick="this.style.display='none'">
-        <img id="weekly-img" src="">
+  <!-- MODAL: Neue Action -->
+  <div class="modal-overlay" id="modal-action" style="display:none">
+    <div class="modal">
+      <div class="modal-title">Neue Action</div>
+      <input class="modal-input" id="new-action-text" placeholder="Beschreibung…" />
+      <input class="modal-input" id="new-action-due" placeholder="Fällig DD.MM. (leer = heute)" />
+      <div class="modal-buttons">
+        <button class="btn-primary" id="btn-save-action">Speichern</button>
+        <button class="btn-ghost" onclick="closeModal('modal-action')">Abbrechen</button>
+      </div>
     </div>
+  </div>
 
-    <div id="settings-panel">
-        <h3 style="color:white; margin-bottom:15px;">Einstellungen</h3>
-        <div id="settings-list"></div>
-        <button class="action-button" onclick="toggleSettings()" style="width:100%;">Schließen</button>
+  <!-- MODAL: Neuer Learn-Link -->
+  <div class="modal-overlay" id="modal-learn" style="display:none">
+    <div class="modal">
+      <div class="modal-title">Neuer Lernlink</div>
+      <select class="modal-input" id="new-learn-kat">
+        <option>Führung</option>
+        <option>Presentation</option>
+        <option>Verhandlungen</option>
+        <option>Rhetorik</option>
+        <option>KI</option>
+        <option>Naturwissenschaften</option>
+        <option>Dehnübungen für Frauen über 50</option>
+        <option>kurze Yogaübungen</option>
+        <option>kurze Sporteinheiten mit den eigenen Körper ohne Hilfsmittel</option>
+      </select>
+      <input class="modal-input" id="new-learn-url" placeholder="URL…" />
+      <div class="modal-buttons">
+        <button class="btn-primary" id="btn-save-learn">Speichern</button>
+        <button class="btn-ghost" onclick="closeModal('modal-learn')">Abbrechen</button>
+      </div>
     </div>
+  </div>
 
-    <script src="script.js"></script>
+  <script src="script.js"></script>
 </body>
 </html>

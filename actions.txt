@@ -1,5 +1,10 @@
 06.04. | 11.04. | App programmieren | 
 06.04. | 06.04. | Song von Knut üben | x
-06.04. | 06.04. | Sporttasche packen | 
-06.04. | 06.04. | Preread SLV HOV 2604 | 
-
+06.04. | 06.04. | Sporttasche packen | x
+06.04. | 06.04. | Preread SLV HOV 2604 | x
+07.04. | 07.04. | XPRA klären | x
+07.04. | 07.04. | Testmatrix generieren | x
+07.04. | 11.04. | Testanlignment SLV/CLOUDOQ | 
+07.04. | 11.04. | Impact Analyse & Process & Meetings | 
+07.04. | 07.07. | Boris Meck ECS K8s informieren über CNTR SL INSTANCE |
+08.04. | 08.04. | CRLBAG Meeting aufsetzen | 
