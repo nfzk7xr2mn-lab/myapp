@@ -31,4 +31,27 @@
 08.04.  15:00-15:35 [PRIVATE] Discuss about reusable task library approach in SLOCON
 08.04.  16:00-16:10 Testmatrixfrage
 
+09.04.  08:30-08:55 Sync Daniel
+09.04.  09:00-10:00 Block Terraform
+09.04.  09:00-11:30 Takt Review
+09.04.  10:00-11:25 CCI4ABAP sync
+09.04.  12:00-12:25 Threatmodeling
+09.04.  12:30-12:55 Status reposhare automation 
+09.04.  13:00-13:25 Sync Jan
+09.04.  13:30-14:30 Technical meeting
+09.04.  15:00-15:25 Monthly coffee PCI
+09.04.  15:30-16:30 Weekly PCI sync
+
+10.04.  08:30-08:45 Sync Fabian
+10.04.  09:00-09:25 crlbag
+10.04.  09:30-10:00 Validation
+10.04.  10:00-11:25 Issue TC_USER
+10.04.  12:00-12:25 Sync Claudia
+10.04.  12:30-12:55 NAAS Pipeline 
+10.04.  13:00-13:25 Sync Michael
+10.04.  13:30-14:00 Sync Simon
+10.04.  14:30-14:55 Sync Thomas
+10.04.  16:00-16:30 Reifen abholen
+
+
 

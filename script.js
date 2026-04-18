@@ -25,6 +25,9 @@ const FALLBACK_LINKS = [
 let rawTermine  = '';
 let rawActions  = '';
 let rawLearn    = '';
+let rawLinks    = '';
+let icsEvents   = [];
+let aktiverFokusTab = 'lernen';
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 function todayStr() {
@@ -51,18 +54,39 @@ function currentPhase() {
 
 function v(ms) { return ms + '?v=' + Date.now(); }
 
+// ── Load ICS automatically ─────────────────────────────────────────────────
+async function loadICSAuto() {
+  const now = new Date();
+  const ymd = now.getFullYear().toString()
+    + (now.getMonth()+1).toString().padStart(2,'0')
+    + now.getDate().toString().padStart(2,'0');
+  try {
+    const res = await fetch(v(`termine_${ymd}.ics`));
+    if (!res.ok) return;
+    const text = await res.text();
+    const events = parseICS(text);
+    if (events.length > 0) {
+      icsEvents = events;
+      renderKalender();
+    }
+  } catch(e) { /* file not yet available, silently skip */ }
+}
+
 // ── Load data ──────────────────────────────────────────────────────────────
 async function loadAll() {
   try {
-    const [tRes, aRes, lRes] = await Promise.all([
+    const [tRes, aRes, lRes, lnRes] = await Promise.all([
       fetch(v('termine.txt')),
       fetch(v('actions.txt')),
       fetch(v('learn.txt')),
+      fetch(v('links.txt')),
     ]);
-    if (tRes.ok) rawTermine = await tRes.text();
-    if (aRes.ok) rawActions = await aRes.text();
-    if (lRes.ok) rawLearn   = await lRes.text();
+    if (tRes.ok)  rawTermine = await tRes.text();
+    if (aRes.ok)  rawActions = await aRes.text();
+    if (lRes.ok)  rawLearn   = await lRes.text();
+    if (lnRes.ok) rawLinks   = await lnRes.text();
   } catch(e) { console.error('Load error', e); }
+  await loadICSAuto();
   renderAll();
 }
 
@@ -82,15 +106,35 @@ function parseLearn() {
   learnLines = rawLearn.split('\n').filter(l => l.trim() !== '');
 }
 
+const WRITE_SERVER = 'http://127.0.0.1:9001';
+
+async function writeFile(name, content) {
+  try {
+    const res = await fetch(`${WRITE_SERVER}/${name}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'text/plain; charset=utf-8' },
+      body: content,
+    });
+    if (!res.ok) throw new Error(res.statusText);
+  } catch(e) {
+    console.error(`writeFile(${name}) failed:`, e);
+    // Fallback: download
+    downloadFile(name, content);
+  }
+}
+
 function saveActionsFile() {
   rawActions = actionLines.join('\n') + '\n';
-  // Download the updated file so user can replace it
-  downloadFile('actions.txt', rawActions);
+  writeFile('actions.txt', rawActions);
 }
 
 function saveLearnFile() {
   rawLearn = learnLines.join('\n') + '\n';
-  downloadFile('learn.txt', rawLearn);
+  writeFile('learn.txt', rawLearn);
+}
+
+function saveLinksFile() {
+  writeFile('links.txt', rawLinks);
 }
 
 function downloadFile(name, content) {
@@ -115,23 +159,40 @@ function renderHeader() {
 
 // ── Render Kalender ────────────────────────────────────────────────────────
 function renderKalender() {
-  const today = todayStr();
-  const now   = new Date();
+  const now    = new Date();
   const curMin = now.getHours() * 60 + now.getMinutes();
-
-  const lines = rawTermine.split('\n').filter(l => l.trim().startsWith(today));
   const calBody = document.getElementById('cal-body');
   const calDate = document.getElementById('cal-date');
 
   calDate.textContent = now.toLocaleDateString('de-DE', { day:'2-digit', month:'2-digit' });
 
+  // Use ICS events if available, otherwise fall back to rawTermine
+  if (icsEvents.length > 0) {
+    calBody.innerHTML = icsEvents.map(e => {
+      const startMin = e.startDate.getHours() * 60 + e.startDate.getMinutes();
+      const endMin   = e.endDate.getHours()   * 60 + e.endDate.getMinutes();
+      const past     = curMin > endMin;
+      const current  = curMin >= startMin && curMin <= endMin;
+      let cls = 'cal-item';
+      if (current) cls += ' cal-current';
+      else if (past) cls += ' cal-past';
+      return `<div class="${cls}">
+        <span class="cal-dot"></span>
+        <span class="cal-time">${fmtTime(e.startDate)}–${fmtTime(e.endDate)}</span>
+        <span>${e.title}</span>
+      </div>`;
+    }).join('');
+    return;
+  }
+
+  // Fallback: rawTermine
+  const today = todayStr();
+  const lines = rawTermine.split('\n').filter(l => l.trim().startsWith(today));
   if (!lines.length) {
     calBody.innerHTML = '<div style="color:var(--text-muted);font-size:0.75rem;padding:8px 0">Keine Termine heute</div>';
     return;
   }
-
   calBody.innerHTML = lines.map(line => {
-    // Format: DD.MM.  HH:MM-HH:MM Bezeichnung
     const rest  = line.slice(today.length).trim();
     const match = rest.match(/^(\d{2}:\d{2})-(\d{2}:\d{2})\s+(.*)/);
     if (!match) return '';
@@ -152,25 +213,42 @@ function renderKalender() {
 }
 
 // ── Render Fokus ───────────────────────────────────────────────────────────
+function switchFokusTab(tab) {
+  aktiverFokusTab = tab;
+  document.querySelectorAll('.fokus-tab').forEach(b =>
+    b.classList.toggle('active', b.textContent.toLowerCase() === tab ||
+      (tab === 'lernen' && b.textContent === 'Lernen') ||
+      (tab === 'sport'  && b.textContent === 'Sport')  ||
+      (tab === 'links'  && b.textContent === 'Links'))
+  );
+  const addBtn = document.getElementById('btn-add-learn');
+  addBtn.textContent = tab === 'links' ? '+ Link' : '+ hinzufügen';
+  renderFokus();
+}
+
 function renderFokus() {
   parseLearn();
-  const today = todayStr();
   const fokusBody = document.getElementById('fokus-body');
   const fokusKat  = document.getElementById('fokus-kategorie');
 
-  // Filter: not done, from today or earlier
+  if (aktiverFokusTab === 'links') {
+    fokusKat.textContent = '';
+    renderLinks(fokusBody);
+    return;
+  }
+
+  const isLernen = aktiverFokusTab === 'lernen';
+  const filterKats = isLernen ? WISSEN_KATS : SPORT_KATS;
+  fokusKat.textContent = isLernen ? 'Lernlinks' : 'Bewegung';
+
   const active = learnLines.filter(l => {
     const p = l.split('|').map(s => s.trim());
-    return p.length >= 3 && p[3] !== 'x';
+    return p.length >= 3 && p[3] !== 'x' && filterKats.includes(p[0]);
   });
 
-  let items = active.slice(0, 5);
-
-  // If none available, use fallback
-  const useFallback = items.length === 0;
-  if (useFallback) {
-    fokusKat.textContent = 'Empfehlungen';
-    fokusBody.innerHTML = FALLBACK_LINKS.map((f, i) =>
+  if (!active.length) {
+    const fallbacks = FALLBACK_LINKS.filter(f => filterKats.includes(f.kat));
+    fokusBody.innerHTML = fallbacks.map((f, i) =>
       `<div class="learn-item">
         <span class="learn-kat" title="${f.kat}">${f.kat.split(' ')[0]}</span>
         <a class="learn-link" href="${f.url}" target="_blank" title="${f.label}">${f.label}</a>
@@ -180,18 +258,42 @@ function renderFokus() {
     return;
   }
 
-  const kats = [...new Set(items.map(l => l.split('|')[0].trim()))];
-  fokusKat.textContent = kats.slice(0,2).join(', ');
-
-  fokusBody.innerHTML = items.map((line, idx) => {
+  fokusBody.innerHTML = active.slice(0, 5).map(line => {
     const p   = line.split('|').map(s => s.trim());
-    const kat = p[0]; const url = p[2]; const label = url.replace(/https?:\/\/(www\.)?/, '').slice(0, 40);
-    return `<div class="learn-item" id="li-${idx}">
+    const kat = p[0]; const url = p[2];
+    const label = url.replace(/https?:\/\/(www\.)?/, '').slice(0, 40);
+    const idx = learnLines.indexOf(line);
+    return `<div class="learn-item">
       <span class="learn-kat" title="${kat}">${kat.split(' ')[0]}</span>
       <a class="learn-link" href="${url}" target="_blank" title="${url}">${label}…</a>
-      <button class="btn-x" title="Als erledigt markieren" onclick="markLearnDone(${learnLines.indexOf(line)})">✕</button>
+      <button class="btn-x" title="Als erledigt markieren" onclick="markLearnDone(${idx})">✕</button>
     </div>`;
   }).join('');
+}
+
+function renderLinks(container) {
+  const lines = rawLinks.split('\n').filter(l => l.trim());
+  if (!lines.length) {
+    container.innerHTML = '<div style="color:var(--text-muted);font-size:0.75rem;padding:8px 0">Keine Links gespeichert</div>';
+    return;
+  }
+  container.innerHTML = lines.map((l, idx) => {
+    const m = l.match(/^\[(.+?)\|(.+?)\]$/);
+    const label = m ? m[1] : l;
+    const url   = m ? m[2] : l;
+    return `<div class="learn-item">
+      <a class="learn-link" href="${escapeHtml(url)}" target="_blank" title="${escapeHtml(url)}">${escapeHtml(label)}</a>
+      <button class="btn-x" title="Löschen" onclick="deleteLink(${idx})">✕</button>
+    </div>`;
+  }).join('');
+}
+
+function deleteLink(idx) {
+  const lines = rawLinks.split('\n').filter(l => l.trim());
+  lines.splice(idx, 1);
+  rawLinks = lines.join('\n') + '\n';
+  saveLinksFile();
+  renderFokus();
 }
 
 function markLearnDone(idx) {
@@ -220,6 +322,16 @@ function renderActions() {
   const today    = todayStr();
   const now      = new Date();
   const todayDate = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const dayOfWeek = todayDate.getDay();
+  const daysToMon = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
+  const weekStart = new Date(todayDate);
+  weekStart.setDate(weekStart.getDate() - daysToMon);
+
+  function parseDateStr(s) {
+    const m = s.match(/^(\d{2})\.(\d{2})\.$/);
+    if (!m) return null;
+    return new Date(now.getFullYear(), parseInt(m[2]) - 1, parseInt(m[1]));
+  }
 
   const actionsBody  = document.getElementById('actions-body');
   const actionsCount = document.getElementById('actions-count');
@@ -232,14 +344,8 @@ function renderActions() {
 
   actionsCount.textContent = `${open.length} offen`;
 
-  function parseDue(s) {
-    const m = s.match(/^(\d{2})\.(\d{2})\.$/);
-    if (!m) return null;
-    return new Date(now.getFullYear(), parseInt(m[2])-1, parseInt(m[1]));
-  }
-
   function dueClass(dueStr) {
-    const d = parseDue(dueStr);
+    const d = parseDateStr(dueStr);
     if (!d) return '';
     if (d < todayDate) return 'overdue';
     if (d.getTime() === todayDate.getTime()) return 'today';
@@ -250,6 +356,11 @@ function renderActions() {
     const p    = line.split('|').map(s => s.trim());
     if (p.length < 3) return '';
     const created = p[0]; const due = p[1]; const text = p[2]; const done = p[3] === 'x';
+    // Hide completed items created before this week
+    if (done) {
+      const createdDate = parseDateStr(created);
+      if (createdDate && createdDate < weekStart) return '';
+    }
     const dc = dueClass(due);
     return `<div class="action-item ${done ? 'done' : ''}" id="ai-${idx}">
       <span class="action-due ${dc}">${due}</span>
@@ -293,8 +404,16 @@ document.getElementById('btn-save-action').addEventListener('click', () => {
 
 // ── Modal: neuer Learn-Link ────────────────────────────────────────────────
 document.getElementById('btn-add-learn').addEventListener('click', () => {
-  document.getElementById('modal-learn').style.display = 'flex';
-  document.getElementById('new-learn-url').focus();
+  if (aktiverFokusTab === 'links') {
+    document.getElementById('modal-link').style.display = 'flex';
+    document.getElementById('new-link-label').focus();
+  } else {
+    const kats = aktiverFokusTab === 'sport' ? SPORT_KATS : WISSEN_KATS;
+    const sel = document.getElementById('new-learn-kat');
+    sel.innerHTML = kats.map(k => `<option>${k}</option>`).join('');
+    document.getElementById('modal-learn').style.display = 'flex';
+    document.getElementById('new-learn-url').focus();
+  }
 });
 
 document.getElementById('btn-save-learn').addEventListener('click', () => {
@@ -309,6 +428,19 @@ document.getElementById('btn-save-learn').addEventListener('click', () => {
   renderFokus();
   closeModal('modal-learn');
   document.getElementById('new-learn-url').value = '';
+});
+
+document.getElementById('btn-save-link').addEventListener('click', () => {
+  const label = document.getElementById('new-link-label').value.trim();
+  const url   = document.getElementById('new-link-url').value.trim();
+  if (!url) return;
+  const entry = label ? `[${label}|${url}]` : `[${url}|${url}]`;
+  rawLinks = rawLinks.trimEnd() + '\n' + entry + '\n';
+  saveLinksFile();
+  renderFokus();
+  closeModal('modal-link');
+  document.getElementById('new-link-label').value = '';
+  document.getElementById('new-link-url').value = '';
 });
 
 function closeModal(id) {
@@ -328,6 +460,342 @@ function renderAll() {
   renderActions();
 }
 
+// ── ICS Import ─────────────────────────────────────────────────────────────
+// ── ICS Import ─────────────────────────────────────────────────────────────
+function icsDateToLocal(val) {
+  // UTC: 20260418T120000Z → Date object in local time
+  if (val.endsWith('Z')) {
+    const y = val.slice(0,4), mo = val.slice(4,6), d = val.slice(6,8);
+    const h = val.slice(9,11), mi = val.slice(11,13), s = val.slice(13,15)||'00';
+    return new Date(`${y}-${mo}-${d}T${h}:${mi}:${s}Z`);
+  }
+  // Local/TZID: 20260418T140000 → treat as local
+  const y = val.slice(0,4), mo = val.slice(4,6), d = val.slice(6,8);
+  const h = val.slice(9,11), mi = val.slice(11,13);
+  return new Date(+y, +mo-1, +d, +h, +mi);
+}
+
+function fmtTime(date) {
+  return date.getHours().toString().padStart(2,'0') + ':' + date.getMinutes().toString().padStart(2,'0');
+}
+
+function parseICS(text) {
+  const now = new Date();
+  const todayYMD = now.getFullYear().toString()
+    + (now.getMonth()+1).toString().padStart(2,'0')
+    + now.getDate().toString().padStart(2,'0');
+
+  const lines = text.replace(/\r\n[ \t]/g, '').replace(/\r/g, '').split('\n');
+  const events = [];
+  let ev = null;
+
+  for (const raw of lines) {
+    const line = raw.trim();
+    if (line === 'BEGIN:VEVENT') { ev = {}; continue; }
+    if (line === 'END:VEVENT')   { if (ev) events.push(ev); ev = null; continue; }
+    if (!ev) continue;
+
+    const sep = line.indexOf(':');
+    if (sep === -1) continue;
+    // key may contain params: SUMMARY;LANGUAGE=en-de → base key is SUMMARY
+    const fullKey = line.slice(0, sep);
+    const baseKey = fullKey.split(';')[0].toUpperCase();
+    const val     = line.slice(sep + 1);
+
+    if (baseKey === 'SUMMARY') ev.title = val.replace(/\\,/g, ',').replace(/\\n/g, ' ').trim();
+    if (baseKey === 'DTSTART') ev.start = val;
+    if (baseKey === 'DTEND')   ev.end   = val;
+  }
+
+  const todayEvents = [];
+  for (const e of events) {
+    if (!e.start || !e.title) continue;
+
+    const startDate = icsDateToLocal(e.start);
+    const endDate   = e.end ? icsDateToLocal(e.end) : startDate;
+
+    // Check if event falls on today (in local time)
+    const evYMD = startDate.getFullYear().toString()
+      + (startDate.getMonth()+1).toString().padStart(2,'0')
+      + startDate.getDate().toString().padStart(2,'0');
+    if (evYMD !== todayYMD) continue;
+
+    todayEvents.push({ startDate, endDate, title: e.title });
+  }
+
+  // Sort by start time
+  todayEvents.sort((a, b) => a.startDate - b.startDate);
+  return todayEvents;
+}
+
+document.getElementById('ics-upload').addEventListener('change', function() {
+  const file = this.files[0];
+  if (!file) return;
+
+  // Validate filename contains today's date: *_YYYYMMDD.ics
+  const now = new Date();
+  const todayYMD = now.getFullYear().toString()
+    + (now.getMonth() + 1).toString().padStart(2, '0')
+    + now.getDate().toString().padStart(2, '0');
+  if (!file.name.includes(todayYMD)) {
+    alert(`Bitte die Datei für heute laden (*_${todayYMD}.ics)`);
+    this.value = '';
+    return;
+  }
+
+  const reader = new FileReader();
+  reader.onload = e => {
+    icsEvents = parseICS(e.target.result);
+    renderKalender();
+  };
+  reader.readAsText(file, 'UTF-8');
+  this.value = '';
+});
+
+// ── Mails ──────────────────────────────────────────────────────────────────
+let mailData = [];
+let activeMailTab = null;  // currently selected date key
+
+const MY_ADDRESSES = ['susanne.schott@sap.com', 'susanne.schott.postfach@web.de'];
+const WEEKDAY_SHORT = ['So','Mo','Di','Mi','Do','Fr','Sa'];
+
+const PRIO_META = {
+  chef:   { label: '★',  title: 'Von meinem Chef',          cls: 'prio-chef'   },
+  direct: { label: '●',  title: 'Direkt an mich',           cls: 'prio-direct' },
+  action: { label: '◆',  title: 'An mich + andere',         cls: 'prio-action' },
+  cc:     { label: '○',  title: 'Nur CC',                   cls: 'prio-cc'     },
+  fyi:    { label: '·',  title: 'Nicht direkt adressiert',  cls: 'prio-fyi'    },
+};
+
+function shortName(full) {
+  if (!full) return '';
+  const trimmed = full.trim();
+  // DL/group: starts with "DL ", contains _ or digits → show as-is
+  if (/^DL\s/i.test(trimmed) || /[_\d]/.test(trimmed)) return trimmed;
+
+  // "Nachname, Vorname" format
+  if (trimmed.includes(',')) {
+    const [last, first] = trimmed.split(',').map(s => s.trim());
+    if (first) return `${first} ${last[0].toUpperCase()}.`;
+    return last;
+  }
+
+  // "Vorname Nachname" format
+  const parts = trimmed.split(/\s+/);
+  if (parts.length === 1) return parts[0];
+  const first = parts[0];
+  const lastInitial = parts[parts.length - 1][0].toUpperCase();
+  return `${first} ${lastInitial}.`;
+}
+
+function mailPrio(m) {
+  // fall back to client-side detection if prio not yet in JSON
+  if (m.prio) return m.prio;
+  if (!m.to) return 'fyi';
+  const lower = m.to.toLowerCase();
+  const hasMe = MY_ADDRESSES.some(a => lower.includes(a));
+  if (!hasMe) return 'fyi';
+  return m.to.split(';').filter(Boolean).length === 1 ? 'direct' : 'action';
+}
+
+async function loadMails() {
+  try {
+    const res = await fetch(v('mails_heute.json'));
+    if (!res.ok) return;
+    mailData = await res.json();
+    renderMails();
+  } catch(e) { console.error('loadMails error:', e); }
+  checkSummaryExists();
+}
+
+function escapeHtml(s) {
+  return (s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+function renderMails() {
+  const body  = document.getElementById('mails-body');
+  const count = document.getElementById('mails-count');
+  const tabs  = document.getElementById('mail-tabs');
+
+  if (!mailData.length) {
+    count.textContent = '0 Mails';
+    tabs.innerHTML = '';
+    body.innerHTML = '<div style="color:var(--text-muted);font-size:0.75rem;padding:8px 0">Keine Mails diese Woche</div>';
+    return;
+  }
+  count.textContent = `${mailData.length} diese Woche`;
+
+  // Build ordered date groups (mails sorted newest-first, so reverse for tab order Mon→Fri)
+  const groupMap = {};
+  for (const m of mailData) {
+    if (!groupMap[m.date]) groupMap[m.date] = [];
+    groupMap[m.date].push(m);
+  }
+  // Sort dates ascending (oldest tab first)
+  const dates = Object.keys(groupMap).sort((a, b) => {
+    const [da, ma] = a.split('.').map(Number);
+    const [db, mb] = b.split('.').map(Number);
+    return ma !== mb ? ma - mb : da - db;
+  });
+
+  // Default active tab: today if present, else last (most recent) date
+  const now = new Date();
+  const todayKey = now.getDate().toString().padStart(2,'0') + '.' + (now.getMonth()+1).toString().padStart(2,'0') + '.';
+  if (!activeMailTab || !groupMap[activeMailTab]) {
+    activeMailTab = groupMap[todayKey] ? todayKey : dates[dates.length - 1];
+  }
+
+  // Render tab buttons
+  tabs.innerHTML = dates.map(date => {
+    const [d, mo] = date.split('.').map(Number);
+    const year = now.getFullYear();
+    const wd = WEEKDAY_SHORT[new Date(year, mo - 1, d).getDay()];
+    const isActive = date === activeMailTab;
+    return `<button class="mail-tab${isActive ? ' active' : ''}" onclick="switchMailTab('${date}')">${wd}</button>`;
+  }).join('');
+
+  // Render mails for active tab
+  renderMailTabContent(groupMap[activeMailTab] || []);
+}
+
+function switchMailTab(date) {
+  activeMailTab = date;
+  renderMails();
+}
+
+function renderMailTabContent(mails) {
+  const body = document.getElementById('mails-body');
+  if (!mails.length) {
+    body.innerHTML = '<div style="color:var(--text-muted);font-size:0.75rem;padding:8px 0">Keine Mails</div>';
+    return;
+  }
+  body.innerHTML = mails.map((m, idx) => {
+    const id   = `mail-${activeMailTab}-${idx}`;
+    const prio = mailPrio(m);
+    const pm   = PRIO_META[prio] || PRIO_META.fyi;
+    return `<div class="mail-item ${pm.cls}" onclick="toggleMail('${id}')">
+      <span class="mail-prio" title="${pm.title}">${pm.label}</span>
+      <span class="mail-time">${m.time}</span>
+      <div class="mail-content">
+        <div class="mail-from"><em>${escapeHtml(shortName(m.from))}</em></div>
+        <div class="mail-subject">${escapeHtml(m.subject)}</div>
+        <div class="mail-body" id="${id}" style="display:none">${escapeHtml(m.body)}</div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+async function checkSummaryExists() {
+  const kw = currentKW();
+  const btn = document.getElementById('btn-show-summary');
+  try {
+    const res = await fetch(`summary_KW${kw}.json?v=` + Date.now());
+    if (res.ok) {
+      const data = await res.json();
+      if (data.summary) {
+        btn.textContent = `KW${kw} lesen`;
+        btn.style.display = '';
+        return;
+      }
+    }
+  } catch(e) {}
+  btn.style.display = 'none';
+}
+
+function renderSummaryHtml(text) {
+  return text
+    .split('\n')
+    .map(line => {
+      if (/^###\s+/.test(line)) return `<h4>${escapeHtml(line.replace(/^###\s+/,''))}</h4>`;
+      if (/^##\s+/.test(line))  return `<h3>${escapeHtml(line.replace(/^##\s+/,''))}</h3>`;
+      if (/^#\s+/.test(line))   return `<h3>${escapeHtml(line.replace(/^#\s+/,''))}</h3>`;
+      if (/^\*\s+/.test(line) || /^-\s+/.test(line)) {
+        const content = line.replace(/^[\*\-]\s+/, '');
+        return `<li>${renderInline(content)}</li>`;
+      }
+      if (line.trim() === '') return '<br>';
+      return `<p>${renderInline(line)}</p>`;
+    })
+    .join('')
+    .replace(/(<li>.*<\/li>)+/g, m => `<ul>${m}</ul>`);
+}
+
+function renderInline(text) {
+  return escapeHtml(text)
+    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+    .replace(/\*(.+?)\*/g, '<em>$1</em>');
+}
+
+async function showSavedSummary() {
+  const kw = currentKW();
+  const body = document.getElementById('mails-body');
+  try {
+    const res = await fetch(`summary_KW${kw}.json?v=` + Date.now());
+    const data = await res.json();
+    body.innerHTML = `<div class="mail-summary">${renderSummaryHtml(data.summary)}</div>
+      <button class="btn-ghost" style="margin-top:8px;font-size:0.65rem" onclick="renderMails()">← Liste anzeigen</button>`;
+  } catch(e) {
+    body.innerHTML = '<div style="color:#e74c3c;font-size:0.75rem;padding:8px 0">Zusammenfassung nicht gefunden.</div>';
+  }
+}
+
+document.getElementById('btn-show-summary').addEventListener('click', showSavedSummary);
+
+function toggleMail(id) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.style.display = el.style.display === 'none' ? 'block' : 'none';
+}
+
+function currentKW() {
+  const now = new Date();
+  const startOfYear = new Date(now.getFullYear(), 0, 1);
+  const dayOfYear = Math.floor((now - startOfYear) / 86400000);
+  const startDow = startOfYear.getDay() || 7; // Mon=1..Sun=7
+  return Math.ceil((dayOfYear + startDow) / 7);
+}
+
+async function summarizeMails() {
+  if (!mailData.length) return;
+  const body = document.getElementById('mails-body');
+  body.innerHTML = '<div style="color:var(--text-muted);font-size:0.75rem;padding:8px 0">Zusammenfassung wird erstellt… (bis zu 1 Min.)</div>';
+
+  const requestedAt = Date.now();
+  const deadline = requestedAt + 90000;
+  const kw = currentKW();
+  const summaryFile = `summary_KW${kw}.json`;
+
+  const poll = async () => {
+    try {
+      const res = await fetch(summaryFile + '?v=' + Date.now());
+      if (res.ok) {
+        const data = await res.json();
+        if (data.summary && data.ts && data.ts >= requestedAt) {
+          body.innerHTML = `<div class="mail-summary">${renderSummaryHtml(data.summary)}</div>
+            <button class="btn-ghost" style="margin-top:8px;font-size:0.65rem" onclick="renderMails()">← Liste anzeigen</button>`;
+          return;
+        }
+      }
+    } catch(e) { /* not yet available */ }
+    if (Date.now() < deadline) {
+      setTimeout(poll, 3000);
+    } else {
+      body.innerHTML = '<div style="color:#e74c3c;font-size:0.75rem;padding:8px 0">Zeitüberschreitung – bitte Task Scheduler prüfen.</div>';
+    }
+  };
+
+  setTimeout(poll, 4000);
+}
+
+document.getElementById('btn-summarize-mails').addEventListener('click', summarizeMails);
+
 // ── Init ───────────────────────────────────────────────────────────────────
 loadAll();
-setInterval(renderAll, 30000);  // refresh every 30s
+loadMails();
+setInterval(renderAll, 30000);
+setInterval(loadICSAuto, 15 * 60000);
+setInterval(() => {
+  // Don't reload mails if any mail body is currently open
+  const anyOpen = document.querySelector('.mail-body[style*="display: block"], .mail-body[style*="display:block"]');
+  if (!anyOpen) loadMails();
+}, 5 * 60000);

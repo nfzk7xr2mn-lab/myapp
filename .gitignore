@@ -1,6 +1,9 @@
 *.png
+*.ics
+secrets.ps1
 termine.txt
 actions.txt
-content.json
 learn.txt
-content.json
+links.txt
+mails_heute.json
+summary_KW*.json

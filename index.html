@@ -30,6 +30,12 @@
           <span class="tile-sub" id="cal-date"></span>
         </div>
         <div class="tile-body" id="cal-body"></div>
+        <div class="tile-footer">
+          <label class="btn-ghost" style="cursor:pointer">
+            + ICS importieren
+            <input type="file" id="ics-upload" accept=".ics" style="display:none" />
+          </label>
+        </div>
       </section>
 
       <!-- TILE 2: FOKUS -->
@@ -39,9 +45,14 @@
           <span class="tile-title">Fokus</span>
           <span class="tile-sub" id="fokus-kategorie"></span>
         </div>
+        <div class="fokus-tabs">
+          <button class="fokus-tab active" onclick="switchFokusTab('lernen')">Lernen</button>
+          <button class="fokus-tab" onclick="switchFokusTab('sport')">Sport</button>
+          <button class="fokus-tab" onclick="switchFokusTab('links')">Links</button>
+        </div>
         <div class="tile-body" id="fokus-body"></div>
         <div class="tile-footer">
-          <button class="btn-ghost" id="btn-add-learn">+ Link hinzufügen</button>
+          <button class="btn-ghost" id="btn-add-learn">+ hinzufügen</button>
         </div>
       </section>
 
@@ -55,6 +66,23 @@
         <div class="tile-body" id="actions-body"></div>
         <div class="tile-footer">
           <button class="btn-ghost" id="btn-add-action">+ Action erfassen</button>
+        </div>
+      </section>
+
+      <!-- TILE 4: MAILS -->
+      <section class="tile" id="tile-mails">
+        <div class="tile-header">
+          <span class="tile-icon">✉️</span>
+          <span class="tile-title">Mails</span>
+          <span class="tile-sub" id="mails-count"></span>
+        </div>
+        <div class="mail-tabs" id="mail-tabs"></div>
+        <div class="tile-body" id="mails-body">
+          <div style="color:var(--text-muted);font-size:0.75rem;padding:8px 0">Wird geladen…</div>
+        </div>
+        <div class="tile-footer" style="display:flex;gap:8px;align-items:center">
+          <button class="btn-ghost" id="btn-summarize-mails">⟳ Zusammenfassen</button>
+          <button class="btn-ghost" id="btn-show-summary" style="display:none"></button>
         </div>
       </section>
 
@@ -94,6 +122,19 @@
       <div class="modal-buttons">
         <button class="btn-primary" id="btn-save-learn">Speichern</button>
         <button class="btn-ghost" onclick="closeModal('modal-learn')">Abbrechen</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: Neuer Link -->
+  <div class="modal-overlay" id="modal-link" style="display:none">
+    <div class="modal">
+      <div class="modal-title">Neuer Link</div>
+      <input class="modal-input" id="new-link-label" placeholder="Bezeichnung…" />
+      <input class="modal-input" id="new-link-url" placeholder="URL…" />
+      <div class="modal-buttons">
+        <button class="btn-primary" id="btn-save-link">Speichern</button>
+        <button class="btn-ghost" onclick="closeModal('modal-link')">Abbrechen</button>
       </div>
     </div>
   </div>
