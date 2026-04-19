@@ -36,6 +36,7 @@ C:\Users\D025095\myapp\myapp\
 ├── register-mail-export.ps1     # Registriert Mail-Export als Task Scheduler Task
 ├── export_outlook_today.ps1     # Exportiert heutige Kalendertermine als ICS → Daten/
 ├── export_outlook_mails.ps1     # Exportiert Mails der Woche als JSON → Daten/; schreibt auch Daten/config.json
+├── export_sync_prep.ps1         # Prüft morgige Syncs, exportiert 2-Wochen-Mails pro Person → Daten/KW{n}-{Vorname}.json
 ├── summarize_mails.ps1          # Erstellt KI-Zusammenfassung via Claude API → Daten/
 ├── secrets.ps1                  # API-Keys, E-Mail-Adressen, Namen (NICHT committet)
 ├── config.json                  # Frontend-Konfiguration: myAddresses (NICHT committet)
@@ -48,11 +49,14 @@ C:\Users\D025095\myapp\myapp\
 │   ├── termine.txt              # Kalender-Fallback (legacy)
 │   ├── termine_YYYYMMDD.ics     # Kalenderexport des jeweiligen Tages
 │   ├── mails_heute.json         # Mails der laufenden Woche (empfangen + gesendet)
+│   ├── KW{n}-{Vorname}.json     # 2-Wochen-Mails pro Sync-Person (erzeugt von export_sync_prep.ps1)
+│   ├── sync_files.json          # Liste der Sync-Dateien für Dashboard [{name, file, date}]
 │   ├── export_mail.log          # Protokoll der Mail-Exportläufe
 │   └── summary_KW{n}.json       # KI-Zusammenfassung der Kalenderwoche n
 │
 └── Wissen/                      # Kuratierte Inhaltsdaten – nicht committet
     ├── hörbuch.json             # Hörbuch-Einträge mit Kerngedanken
+    ├── hinterbliebenen.json     # Postmortem-Checkliste (gleiches Format wie hörbuch.json)
     ├── links.json               # Bookmark-Links
     ├── lernplan.json            # 6-Wochen-Lernplan (Tech + Führung, 42 Tage)
     ├── lernplan_progress.json   # Fortschritt im Lernplan { "1": true, ... }
@@ -140,6 +144,13 @@ Jede Kachel (`div.tile`) hat:
 ### Fallback
 - Falls keine ICS-Datei vorhanden: `rawTermine` aus `Daten/termine.txt` (legacy)
 
+### Sync-Vorbereitung (📋-Link)
+- Beim Start wird `Daten/sync_files.json` geladen (erzeugt von `export_sync_prep.ps1`)
+- Enthält `[{name, file, date}]` — eine Zeile pro Sync-Termin mit Dateiname
+- Beim Rendern eines Kalendereintrags: wenn der Terminbetreff einen Namen aus `syncFiles` enthält, wird ein 📋-Link neben dem Titel eingeblendet
+- Klick auf 📋 öffnet Modal `#modal-sync` und lädt `Daten/{file}` (KW{n}-{Vorname}.json)
+- Modal zeigt Mail-Liste chronologisch: Datum, Typ (empfangen/gesendet), Absender/Empfänger gekürzt via `shortName()` (Vorname N.), Betreff, Body-Vorschau
+
 ---
 
 ## 5. Kachel 2: Fokus (6 Tabs)
@@ -156,8 +167,11 @@ Jede Kachel (`div.tile`) hat:
 ### Tab Notizen
 - Schnellnotizen aus `Daten/notizen.json`
 - Jede Notiz: Überschrift + Datum in der Zusammenfassung — Freitext aufklappbar via `<details>`, standardmäßig geschlossen
-- Neueste Notiz oben (beim Speichern per `unshift` eingefügt)
+- Offene Notizen bleiben beim Re-Render offen (open-State wird per Index gespeichert und wiederhergestellt)
+- Zeilen mit Emoji am Anfang werden **fett** dargestellt, reine Textzeilen in `--text-muted` (grau)
+- ✎-Button öffnet Modal mit vorausgefülltem Inhalt zum Bearbeiten (Datum bleibt erhalten)
 - ✕-Button löscht Notiz dauerhaft
+- Neueste Notiz oben (beim Speichern per `unshift` eingefügt)
 - `+ Notiz` Button öffnet Modal mit Überschrift + Textarea
 - Dateiformat `Daten/notizen.json`:
 ```json
@@ -199,7 +213,15 @@ Jede Kachel (`div.tile`) hat:
 
 ### Tab Wissen
 - Hörbücher aus `Wissen/hörbuch.json`
+- Hinterbliebenen-Checkliste aus `Wissen/hinterbliebenen.json` (gleiche Struktur)
+- Beide werden parallel via `Promise.allSettled` geladen
 - Aufklappbar: Titel → Zusammenfassung → Resümee (Kerngedanken)
+- Abschnittstrenner `wissen-section-header` zwischen den beiden Quellen
+- Dateiformat identisch für beide JSONs:
+```json
+[{"titel":"…","autor":"…","zusammenfassung":"…","kerngedanken":[{"nr":1,"titel":"…","beschreibung":"…"}]}]
+```
+- Zeilenumbrüche in `beschreibung` als `\n` escapen (JSON erlaubt keine echten Zeilenumbrüche)
 
 ### Schreiben via Write-Server
 - `saveNotizenFile()` → PUT `/notizen.json` → `Daten/notizen.json`
@@ -233,6 +255,7 @@ Jede Kachel (`div.tile`) hat:
 - Überfällig: rot (`#e74c3c`)
 - Heute fällig: gold, fett
 - Offen/zukünftig: gedämpft
+- URLs im Text werden automatisch als klickbare Links dargestellt (`linkify()`, öffnet in neuem Tab)
 
 ### Schreiben via Write-Server
 - `saveActionsFile()` → PUT `http://127.0.0.1:9001/actions.json` → `Daten/actions.json`
@@ -345,8 +368,13 @@ $ProxyUri        = "http://localhost:9000/anthropic/v1/messages"
 $MyAddresses     = @('email1@...', 'email2@...')
 $MyDisplayNames  = @('nachname, vorname', 'vorname nachname')
 $ChefNames       = @('nachname, vorname', 'vorname nachname')
+$ChefEmail       = 'vorname.nachname@sap.com'
+$Mitarbeiter     = @(
+    @{ name = 'Nachname, Vorname'; email = 'vorname.nachname@sap.com' },
+    ...
+)
 ```
-Wird in jedem Skript via `. "$PSScriptRoot\secrets.ps1"` geladen.
+`$Mitarbeiter` enthält alle direkten Mitarbeiter als Hashtable-Array. `$ChefEmail` ist die E-Mail-Adresse des Vorgesetzten. Wird in jedem Skript via `. "$PSScriptRoot\secrets.ps1"` geladen.
 
 ### 9.1b `Daten/config.json` (nicht committet, auto-generiert)
 ```json
@@ -373,17 +401,32 @@ Wird von `export_outlook_mails.ps1` aus `$MyAddresses` (secrets.ps1) erzeugt. Wi
 - Überschreibt bestehende Datei **nicht** wenn Export 0 Mails liefert
 - Erstellt `Daten/` automatisch falls nicht vorhanden
 
-### 9.4 `summarize_mails.ps1`
+### 9.4 `export_sync_prep.ps1`
+- Prüft Kalender des **nächsten Tages** auf 1:1-Sync-Termine mit Mitarbeitern und Chef
+- Suchpool: `$Mitarbeiter` + `@{ name='Reichart, Stephan'; email=$ChefEmail }` (aus secrets.ps1)
+- Namensabgleich: Namensteile (>2 Zeichen) gegen Terminbetreff (case-insensitive)
+- Lädt alle Inbox- und Gesendete-Mails der letzten **2 Wochen** einmalig (nicht pro Person)
+- Mail-Filter via **DASL-Syntax** (`@SQL="urn:schemas:httpmail:datereceived" >= '...'`) — notwendig weil Outlook `Restrict()` mit `[ReceivedTime]` auf Exchange-Stores versagt
+- Suche in Inbox rekursiv (inkl. Unterordner), ebenso Gesendete Elemente
+- Matching pro Person: Empfangen → Absender-Email/Name; Gesendet → To/CC-Felder
+- Schreibt `Daten/KW{n}-{Vorname}.json` pro gefundener Person (UTF-8 ohne BOM)
+- Schreibt `Daten/sync_files.json`: `[{name, file, date}]` für Dashboard-Integration
+- Dateiformat `Daten/KW{n}-{Vorname}.json`:
+```json
+[{"date":"19.04.2026","time":"09:42","typ":"empfangen","from":"...","to":"...","subject":"...","body":"..."}]
+```
+
+### 9.5 `summarize_mails.ps1`
 - Liest `Daten/mails_heute.json`
 - Sendet POST an Anthropic-API (via lokalem Proxy Port 9000)
 - Modell: `anthropic--claude-sonnet-latest`, max 2048 Tokens
 - Schreibt `Daten/summary_KW{n}.json`
 - Erstellt `Daten/` automatisch falls nicht vorhanden
 
-### 9.5 `start-servers.ps1`
+### 9.6 `start-servers.ps1`
 Startet live-server (Port 5500) und write-server (Port 9001). Stoppt zuvor einen laufenden write-server auf Port 9001.
 
-### 9.6 `register-mail-export.ps1`
+### 9.7 `register-mail-export.ps1`
 Registriert `export_outlook_mails.ps1` als Task Scheduler Task mit `LogonType Interactive`.
 
 ---
@@ -392,7 +435,7 @@ Registriert `export_outlook_mails.ps1` als Task Scheduler Task mit `LogonType In
 
 | Was                           | Intervall         | Bedingung                                   |
 |-------------------------------|-------------------|---------------------------------------------|
-| Uhr + Header                  | alle 30 Sekunden  | immer                                       |
+| Uhr + Header                  | alle 60 Sekunden  | immer                                       |
 | ICS-Datei nachladen           | alle 15 Minuten   | immer                                       |
 | Mails nachladen               | alle 5 Minuten    | nur wenn kein Mail-Body gerade geöffnet     |
 | Mail-Export + Zusammenfassung | auf Knopfdruck    | Button "Zusammenfassen" triggert beides     |
@@ -423,6 +466,7 @@ Wissen/
 | `modal-action`  | Neue Action erfassen           | Text, Fälligkeitsdatum              |
 | `modal-notiz`   | Neue Schnellnotiz erfassen     | Überschrift, Freitext (Textarea)    |
 | `modal-link`    | Neuen Bookmark-Link hinzufügen | Bezeichnung (optional), URL         |
+| `modal-sync`    | Sync-Mails anzeigen            | Read-only, Mail-Liste aus KW{n}-{Vorname}.json |
 
 Geschlossen per Klick auf den Hintergrund. Footer-Buttons je nach aktivem Tab eingeblendet.
 
@@ -463,6 +507,9 @@ Geschlossen per Klick auf den Hintergrund. Footer-Buttons je nach aktivem Tab ei
 - **ICS Datumsformat**: Ganztagstermine als `VALUE=DATE` (kein `T`), normale Termine UTC mit `Z`-Suffix; Parser erkennt beide Formate automatisch
 - **Free-Termine ausgeblendet**: `BusyStatus=0` → PS-Skript schreibt `TRANSP:TRANSPARENT`, Parser überspringt diese Events
 - **WEEKDAY_SHORT**: Muss als Konstante in script.js definiert sein — fehlt sie, ist die Seite leer
+- **DASL-Filter für Outlook Restrict()**: `[ReceivedTime]`-Filter schlägt auf Exchange-Stores (inkl. Unterordner) komplett fehl — liefert 0 Ergebnisse trotz vorhandener Mails. Lösung: DASL-Syntax `@SQL="urn:schemas:httpmail:datereceived" >= 'yyyy-MM-dd HH:mm:ss'` mit UTC-Zeitstempel. Für Gesendete: `urn:schemas:httpmail:date`.
+- **PowerShell case-insensitiv**: `$SyncPersonen` und `$syncPersonen` sind dieselbe Variable — Akkumulator muss anders heißen (z.B. `$gefunden`).
+- **Kalender-Restrict() funktioniert weiterhin** mit klassischem Format — nur Mail-Ordner brauchen DASL.
 - **Em-Dashes in PS-Scripts**: PowerShell-Dateien müssen ASCII-sichere Zeichen verwenden (kein `—`, kein `–`)
 - **Daten/ wird auto-erstellt**: Alle PS-Skripte prüfen ob `Daten/` existiert und legen es ggf. an
 - **Sport ist Standard-Tab**: Nur vor 8 Uhr; tagsüber Notizen, ab 17 Uhr Wissen — gesteuert via `defaultFokusTab()` in script.js

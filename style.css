@@ -198,7 +198,8 @@ body.phase-nacht      { background: radial-gradient(ellipse at top, #080c18 0%, 
   font-size: 0.7rem;
   font-weight: 400;
   color: var(--text-muted);
-  margin-left: 8px;
+  margin-left: auto;
+  text-align: right;
 }
 .wissen-zusammenfassung {
   font-size: 0.72rem;
@@ -281,6 +282,9 @@ body.phase-nacht      { background: radial-gradient(ellipse at top, #080c18 0%, 
 }
 .cal-current .cal-dot { background: var(--gold); box-shadow: 0 0 6px var(--gold); }
 
+.cal-sync-link { text-decoration: none; margin-left: 4px; opacity: 0.7; font-size: 0.75rem; cursor: pointer; }
+.cal-sync-link:hover { opacity: 1; }
+
 /* ── Learn Items ──────────────────────────────────────────────────────── */
 .learn-item {
   display: flex;
@@ -356,6 +360,8 @@ body.phase-nacht      { background: radial-gradient(ellipse at top, #080c18 0%, 
 .action-due.today   { color: var(--gold); font-weight: 600; }
 
 .action-text { flex: 1; font-size: 0.74rem; line-height: 1.35; }
+.action-link { color: var(--gold-light); text-decoration: none; word-break: break-all; }
+.action-link:hover { text-decoration: underline; }
 
 .action-created {
   font-size: 0.6rem;
@@ -688,6 +694,17 @@ body.phase-nacht      { background: radial-gradient(ellipse at top, #080c18 0%, 
   font-size: 0.65rem;
   color: var(--text-muted);
   font-style: italic;
+}
+
+.wissen-section-header {
+  font-size: 0.65rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: var(--gold-dark);
+  padding: 10px 0 4px;
+  border-top: 1px solid var(--tile-border);
+  margin-top: 6px;
 }
 
 /* ── Notizen ──────────────────────────────────────────────────────────── */.notiz-empty {

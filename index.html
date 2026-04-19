@@ -129,6 +129,17 @@
     </div>
   </div>
 
+  <!-- MODAL: Sync Mails -->
+  <div class="modal-overlay" id="modal-sync" style="display:none" onclick="if(event.target===this)closeModal('modal-sync')">
+    <div class="modal" style="min-width:520px;max-width:720px;max-height:80vh;overflow-y:auto">
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <div class="modal-title" id="modal-sync-title"></div>
+        <button class="btn-ghost" onclick="closeModal('modal-sync')">✕</button>
+      </div>
+      <div id="modal-sync-body"></div>
+    </div>
+  </div>
+
   <script src="script.js"></script>
 </body>
 </html>

@@ -19,6 +19,7 @@ let sportData   = [];
 let notizenData = [];
 let icsEvents       = [];
 let icsTomorrowEvents = [];
+let syncFiles     = [];  // from Daten/sync_files.json
 let aktiverFokusTab  = 'notizen';
 let lernplanData     = null;
 let lernplanProgress = {};
@@ -80,13 +81,14 @@ async function loadICSAuto() {
     }
   } catch(e) {}
 
-  renderKalender();
+  const syncModalOpen = document.getElementById('modal-sync').style.display !== 'none';
+  if (!syncModalOpen) renderKalender();
 }
 
 // ── Load data ──────────────────────────────────────────────────────────────
 async function loadAll() {
   try {
-    const [tRes, aRes, lRes, lnRes, lpRes, lpProg, spRes, nRes] = await Promise.all([
+    const [tRes, aRes, lRes, lnRes, lpRes, lpProg, spRes, nRes, sfRes] = await Promise.all([
       fetch(v('Daten/termine.txt')),
       fetch(v('Daten/actions.json')),
       fetch(v('Daten/learn.txt')),
@@ -95,15 +97,17 @@ async function loadAll() {
       fetch(v('Wissen/lernplan_progress.json')),
       fetch(v('Wissen/sport.json')),
       fetch(v('Daten/notizen.json')),
+      fetch(v('Daten/sync_files.json')),
     ]);
-    if (tRes.ok)   rawTermine      = await tRes.text();
-    if (aRes.ok)   actionsData     = await aRes.json();
-    if (lRes.ok)   rawLearn        = await lRes.text();
-    if (lnRes.ok)  linksData       = await lnRes.json();
-    if (lpRes.ok)  lernplanData    = await lpRes.json();
+    if (tRes.ok)   rawTermine       = await tRes.text();
+    if (aRes.ok)   actionsData      = await aRes.json();
+    if (lRes.ok)   rawLearn         = await lRes.text();
+    if (lnRes.ok)  linksData        = await lnRes.json();
+    if (lpRes.ok)  lernplanData     = await lpRes.json();
     if (lpProg.ok) lernplanProgress = await lpProg.json();
-    if (spRes.ok)  sportData       = await spRes.json();
-    if (nRes.ok)   notizenData     = await nRes.json();
+    if (spRes.ok)  sportData        = await spRes.json();
+    if (nRes.ok)   notizenData      = await nRes.json();
+    if (sfRes.ok)  syncFiles        = await sfRes.json();
   } catch(e) { console.error('Load error', e); }
   await loadICSAuto();
   aktiverFokusTab = defaultFokusTab();
@@ -232,11 +236,19 @@ function renderKalender() {
   // Use ICS events if available, otherwise fall back to rawTermine
   if (icsEvents.length > 0) {
     const renderEvent = (e, extraCls = '') => {
+      // check if a sync prep file exists for this event
+      const syncMatch = syncFiles.find(sf => {
+        const nameParts = sf.name.split(/[, ]+/).filter(p => p.length > 2);
+        return nameParts.some(p => e.title.toLowerCase().includes(p.toLowerCase()));
+      });
+      const syncLink = syncMatch
+        ? ` <span class="cal-sync-link" onclick="openSyncModal('${syncMatch.file}','${syncMatch.name}')">📋</span>`
+        : '';
       if (e.allDay) {
         return `<div class="cal-item cal-allday-item${extraCls ? ' ' + extraCls : ''}">
           <span class="cal-dot"></span>
           <span class="cal-time" style="font-style:italic">Ganztag</span>
-          <span>${e.title}</span>
+          <span>${e.title}${syncLink}</span>
         </div>`;
       }
       const startMin = e.startDate.getHours() * 60 + e.startDate.getMinutes();
@@ -250,7 +262,7 @@ function renderKalender() {
       return `<div class="${cls}">
         <span class="cal-dot"></span>
         <span class="cal-time">${fmtTime(e.startDate)}–${fmtTime(e.endDate)}</span>
-        <span>${e.title}</span>
+        <span>${e.title}${syncLink}</span>
       </div>`;
     };
 
@@ -407,33 +419,50 @@ function renderLinks(container) {
 function renderLernplan() {} // unused, kept for safety
 
 function renderWissen(container) {
-  fetch('Wissen/hörbuch.json')
-    .then(r => r.json())
-    .then(data => {
-      container.innerHTML = data.map(b => {
-        const gedanken = (b.kerngedanken || []).map(g =>
-          `<div class="wissen-gedanke-item">
-            <strong>${g.nr}. ${escapeHtml(g.titel)}</strong>
-            <p class="wissen-beschreibung">${escapeHtml(g.beschreibung)}</p>
-          </div>`
-        ).join('');
-        const gedankenBlock = gedanken ? `<details class="wissen-gedanke">
-          <summary>Resümee</summary>
-          <div class="wissen-gedanken">${gedanken}</div>
-        </details>` : '';
-        return `<details class="wissen-buch">
-          <summary class="wissen-buch-header">
-            <span>📖 ${escapeHtml(b.titel)}</span>
-            <span class="wissen-autor">${escapeHtml(b.autor)}</span>
-          </summary>
-          ${b.zusammenfassung ? `<p class="wissen-zusammenfassung">${escapeHtml(b.zusammenfassung)}</p>` : ''}
-          ${gedankenBlock}
-        </details>`;
-      }).join('');
-    })
-    .catch(() => {
-      container.innerHTML = '<div style="color:var(--text-muted);font-size:0.75rem;padding:8px 0">Hörbücher nicht geladen</div>';
-    });
+  Promise.allSettled([
+    fetch('Wissen/hörbuch.json').then(r => r.json()),
+    fetch('Wissen/hinterbliebenen.json').then(r => r.json())
+  ]).then(([hoerbuchRes, hinterbliebenenRes]) => {
+    const renderBuecher = (data, icon) => data.map(b => {
+      const gedanken = (b.kerngedanken || []).map(g =>
+        `<div class="wissen-gedanke-item">
+          <strong>${g.nr}. ${escapeHtml(g.titel)}</strong>
+          <p class="wissen-beschreibung">${escapeHtml(g.beschreibung)}</p>
+        </div>`
+      ).join('');
+      const gedankenBlock = gedanken ? `<details class="wissen-gedanke">
+        <summary>Resümee</summary>
+        <div class="wissen-gedanken">${gedanken}</div>
+      </details>` : '';
+      return `<details class="wissen-buch">
+        <summary class="wissen-buch-header">
+          <span>${icon} ${escapeHtml(b.titel)}</span>
+          <span class="wissen-autor">${escapeHtml(b.autor)}</span>
+        </summary>
+        ${b.zusammenfassung ? `<p class="wissen-zusammenfassung">${escapeHtml(b.zusammenfassung)}</p>` : ''}
+        ${gedankenBlock}
+      </details>`;
+    }).join('');
+
+    let html = '';
+    if (hoerbuchRes.status === 'fulfilled') {
+      html += renderBuecher(hoerbuchRes.value, '📖');
+    }
+    if (hinterbliebenenRes.status === 'fulfilled') {
+      html += renderBuecher(hinterbliebenenRes.value, '📋');
+    }
+    container.innerHTML = html || '<div style="color:var(--text-muted);font-size:0.75rem;padding:8px 0">Keine Inhalte geladen</div>';
+  });
+}
+
+function formatNotizText(text) {
+  const emojiRe = /^\p{Emoji}/u;
+  return text.split('\n').map(line => {
+    const escaped = escapeHtml(line);
+    return emojiRe.test(line)
+      ? `<strong>${escaped}</strong>`
+      : `<span style="color:var(--text-muted)">${escaped}</span>`;
+  }).join('<br>');
 }
 
 function renderNotizen(container) {
@@ -441,16 +470,34 @@ function renderNotizen(container) {
     container.innerHTML = '<div class="notiz-empty">Noch keine Notizen. Oben erfassen.</div>';
     return;
   }
+  // preserve open state of <details> by index
+  const openSet = new Set(
+    [...container.querySelectorAll('details.notiz-item')].reduce((acc, el, i) => {
+      if (el.open) acc.push(i); return acc;
+    }, [])
+  );
   container.innerHTML = notizenData.map((n, idx) =>
-    `<details class="notiz-item">
+    `<details class="notiz-item"${openSet.has(idx) ? ' open' : ''}>
       <summary class="notiz-summary">
         <span class="notiz-titel">${escapeHtml(n.titel)}</span>
         <span class="notiz-datum">${n.datum}</span>
+        <button class="btn-x notiz-del" title="Bearbeiten" onclick="editNotiz(event,${idx})">✎</button>
         <button class="btn-x notiz-del" title="Löschen" onclick="deleteNotiz(event,${idx})">✕</button>
       </summary>
-      <div class="notiz-body">${escapeHtml(n.text).replace(/\n/g,'<br>')}</div>
+      <div class="notiz-body">${formatNotizText(n.text)}</div>
     </details>`
   ).join('');
+}
+
+function editNotiz(e, idx) {
+  e.preventDefault();
+  e.stopPropagation();
+  const n = notizenData[idx];
+  document.getElementById('new-notiz-titel').value = n.titel;
+  document.getElementById('new-notiz-text').value  = n.text;
+  document.getElementById('modal-notiz').style.display = '';
+  document.getElementById('modal-notiz').dataset.editIdx = idx;
+  document.getElementById('new-notiz-titel').focus();
 }
 
 function deleteNotiz(e, idx) {
@@ -512,7 +559,7 @@ function renderActions() {
     const dc = dueClass(a.due);
     return `<div class="action-item ${a.done ? 'done' : ''}" id="ai-${idx}">
       <span class="action-due ${dc}">${a.due || ''}</span>
-      <span class="action-text">${a.text}</span>
+      <span class="action-text">${linkify(a.text)}</span>
       <span class="action-created">${a.created || ''}</span>
       ${!a.done ? `<button class="btn-x" title="Erledigt" onclick="markActionDone(${idx})">✕</button>` : ''}
     </div>`;
@@ -567,10 +614,17 @@ document.getElementById('btn-add-notiz').addEventListener('click', () => {
 });
 
 document.getElementById('btn-save-notiz').addEventListener('click', () => {
-  const titel = document.getElementById('new-notiz-titel').value.trim();
-  const text  = document.getElementById('new-notiz-text').value.trim();
+  const titel    = document.getElementById('new-notiz-titel').value.trim();
+  const text     = document.getElementById('new-notiz-text').value.trim();
   if (!titel && !text) return;
-  notizenData.unshift({ titel: titel || '—', datum: todayStr(), text });
+  const modal    = document.getElementById('modal-notiz');
+  const editIdx  = modal.dataset.editIdx !== undefined ? parseInt(modal.dataset.editIdx) : -1;
+  if (editIdx >= 0) {
+    notizenData[editIdx] = { ...notizenData[editIdx], titel: titel || '—', text };
+    delete modal.dataset.editIdx;
+  } else {
+    notizenData.unshift({ titel: titel || '—', datum: todayStr(), text });
+  }
   saveNotizenFile();
   renderFokus();
   closeModal('modal-notiz');
@@ -578,8 +632,41 @@ document.getElementById('btn-save-notiz').addEventListener('click', () => {
   document.getElementById('new-notiz-text').value  = '';
 });
 
+function openSyncModal(file, name) {
+  document.getElementById('modal-sync-title').textContent = 'Sync-Vorbereitung: ' + name;
+  const body = document.getElementById('modal-sync-body');
+  body.innerHTML = '<div style="color:var(--text-muted);font-size:0.75rem;padding:8px 0">Lade…</div>';
+  document.getElementById('modal-sync').style.display = '';
+  fetch('Daten/' + file)
+    .then(r => r.json())
+    .then(mails => {
+      if (!mails.length) {
+        body.innerHTML = '<div style="color:var(--text-muted);font-size:0.75rem;padding:8px 0">Keine Mails gefunden.</div>';
+        return;
+      }
+      body.innerHTML = mails.map(m => `
+        <div class="mail-item prio-${m.typ === 'gesendet' ? 'sent' : 'direct'}" style="padding:6px 4px;margin-bottom:2px">
+          <div class="mail-time">${m.date} ${m.time}</div>
+          <div class="mail-content">
+            <div class="mail-from">${escapeHtml(m.typ === 'gesendet' ? '→ ' + shortName(m.to) : shortName(m.from))}</div>
+            <div class="mail-subject">${escapeHtml(m.subject)}</div>
+            <div class="mail-body" style="display:none">${escapeHtml(m.body)}</div>
+          </div>
+        </div>`).join('');
+      body.querySelectorAll('.mail-item').forEach(el => {
+        el.addEventListener('click', () => {
+          const b = el.querySelector('.mail-body');
+          b.style.display = b.style.display === 'none' ? '' : 'none';
+        });
+      });
+    })
+    .catch(() => { body.innerHTML = '<div style="color:#e74c3c;font-size:0.75rem">Datei nicht gefunden.</div>'; });
+}
+
 function closeModal(id) {
-  document.getElementById(id).style.display = 'none';
+  const el = document.getElementById(id);
+  el.style.display = 'none';
+  delete el.dataset.editIdx;
 }
 
 // Close modal on overlay click
@@ -613,6 +700,12 @@ function icsDateToLocal(val) {
   const y = val.slice(0,4), mo = val.slice(4,6), d = val.slice(6,8);
   const h = val.slice(9,11), mi = val.slice(11,13);
   return { allDay: false, date: new Date(+y, +mo-1, +d, +h, +mi) };
+}
+
+function linkify(text) {
+  return text.replace(/(https?:\/\/[^\s]+)/g, url =>
+    `<a href="${url}" target="_blank" class="action-link">${url}</a>`
+  );
 }
 
 function fmtTime(date) {
@@ -937,7 +1030,7 @@ fetch('Daten/config.json').then(r => r.json()).then(cfg => {
   loadAll();
   loadMails();
 });
-setInterval(renderHeader, 30000);
+setInterval(renderHeader, 60000);
 setInterval(loadICSAuto, 15 * 60000);
 setInterval(() => {
   const anyOpen = document.querySelector('.mail-body[style*="display: block"], .mail-body[style*="display:block"]');
