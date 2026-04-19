@@ -2,6 +2,17 @@
 # Run this script once; both servers keep running in separate windows
 
 $appDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+$port   = 9001
+
+# Stop existing write-server on port 9001
+$proc = Get-NetTCPConnection -LocalPort $port -ErrorAction SilentlyContinue |
+        Select-Object -ExpandProperty OwningProcess -ErrorAction SilentlyContinue |
+        Select-Object -Unique
+if ($proc) {
+    Stop-Process -Id $proc -Force -ErrorAction SilentlyContinue
+    Write-Host "Alter write-server gestoppt (PID $proc)" -ForegroundColor Yellow
+    Start-Sleep -Milliseconds 500
+}
 
 # Write server (Node.js, port 9001)
 Start-Process "node" -ArgumentList "`"$appDir\write-server.js`"" `
@@ -13,6 +24,6 @@ Start-Process "cmd" -ArgumentList "/c npx live-server --port=5500 --no-browser `
     -WorkingDirectory $appDir `
     -WindowStyle Minimized
 
-Write-Host "Servers started:" -ForegroundColor Green
+Write-Host "Servers gestartet:" -ForegroundColor Green
 Write-Host "  App:          http://127.0.0.1:5500" -ForegroundColor Cyan
 Write-Host "  Write server: http://127.0.0.1:9001" -ForegroundColor Cyan

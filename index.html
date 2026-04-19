@@ -30,12 +30,7 @@
           <span class="tile-sub" id="cal-date"></span>
         </div>
         <div class="tile-body" id="cal-body"></div>
-        <div class="tile-footer">
-          <label class="btn-ghost" style="cursor:pointer">
-            + ICS importieren
-            <input type="file" id="ics-upload" accept=".ics" style="display:none" />
-          </label>
-        </div>
+        <div class="tile-footer"><button class="btn-ghost" style="border-color:transparent">&nbsp;</button></div>
       </section>
 
       <!-- TILE 2: FOKUS -->
@@ -46,13 +41,18 @@
           <span class="tile-sub" id="fokus-kategorie"></span>
         </div>
         <div class="fokus-tabs">
-          <button class="fokus-tab active" onclick="switchFokusTab('lernen')">Lernen</button>
-          <button class="fokus-tab" onclick="switchFokusTab('sport')">Sport</button>
-          <button class="fokus-tab" onclick="switchFokusTab('links')">Links</button>
+          <button class="fokus-tab" data-tab="notizen"  onclick="switchFokusTab('notizen')">Notizen</button>
+          <button class="fokus-tab" data-tab="sport"    onclick="switchFokusTab('sport')">Sport</button>
+          <button class="fokus-tab" data-tab="fuehrung" onclick="switchFokusTab('fuehrung')">Führung</button>
+          <button class="fokus-tab" data-tab="tech"     onclick="switchFokusTab('tech')">Tech</button>
+          <button class="fokus-tab" data-tab="links"    onclick="switchFokusTab('links')">Links</button>
+          <button class="fokus-tab" data-tab="wissen"   onclick="switchFokusTab('wissen')">Wissen</button>
         </div>
         <div class="tile-body" id="fokus-body"></div>
         <div class="tile-footer">
-          <button class="btn-ghost" id="btn-add-learn">+ hinzufügen</button>
+          <button class="btn-ghost" id="btn-add-notiz" style="display:none">+ Notiz</button>
+          <button class="btn-ghost" id="btn-add-learn" style="display:none">+ Link</button>
+          <button class="btn-ghost" id="btn-fokus-placeholder" style="border-color:transparent;color:transparent">&nbsp;</button>
         </div>
       </section>
 
@@ -103,25 +103,15 @@
     </div>
   </div>
 
-  <!-- MODAL: Neuer Learn-Link -->
-  <div class="modal-overlay" id="modal-learn" style="display:none">
+  <!-- MODAL: Neue Notiz -->
+  <div class="modal-overlay" id="modal-notiz" style="display:none" onclick="if(event.target===this)closeModal('modal-notiz')">
     <div class="modal">
-      <div class="modal-title">Neuer Lernlink</div>
-      <select class="modal-input" id="new-learn-kat">
-        <option>Führung</option>
-        <option>Presentation</option>
-        <option>Verhandlungen</option>
-        <option>Rhetorik</option>
-        <option>KI</option>
-        <option>Naturwissenschaften</option>
-        <option>Dehnübungen für Frauen über 50</option>
-        <option>kurze Yogaübungen</option>
-        <option>kurze Sporteinheiten mit den eigenen Körper ohne Hilfsmittel</option>
-      </select>
-      <input class="modal-input" id="new-learn-url" placeholder="URL…" />
+      <div class="modal-title">Neue Notiz</div>
+      <input class="modal-input" id="new-notiz-titel" placeholder="Überschrift…" />
+      <textarea class="modal-input modal-textarea" id="new-notiz-text" placeholder="Notiz…" rows="5"></textarea>
       <div class="modal-buttons">
-        <button class="btn-primary" id="btn-save-learn">Speichern</button>
-        <button class="btn-ghost" onclick="closeModal('modal-learn')">Abbrechen</button>
+        <button class="btn-primary" id="btn-save-notiz">Speichern</button>
+        <button class="btn-ghost" onclick="closeModal('modal-notiz')">Abbrechen</button>
       </div>
     </div>
   </div>

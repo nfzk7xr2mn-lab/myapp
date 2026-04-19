@@ -3,7 +3,9 @@
 
 . "$PSScriptRoot\secrets.ps1"
 
-$outputDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+$scriptDir  = Split-Path -Parent $MyInvocation.MyCommand.Path
+$outputDir  = Join-Path $scriptDir "Daten"
+if (-not (Test-Path $outputDir)) { New-Item -ItemType Directory -Path $outputDir | Out-Null }
 $mailsFile  = Join-Path $outputDir "mails_heute.json"
 
 # Calendar week number
@@ -38,17 +40,19 @@ function Get-ShortName($full) {
 }
 
 $mailText = ($mails | ForEach-Object {
-    $name = Get-ShortName $_.from
-    "[$($_.date) $($_.time)] Von: $name | Betreff: $($_.subject)"
+    $name      = Get-ShortName $_.from
+    $richtung  = if ($_.typ -eq 'gesendet') { "GESENDET AN: $(Get-ShortName ($_.to -split ';')[0])" } else { "VON: $name" }
+    $auftrag   = if ($_.auftrag) { ' [AUFTRAG]' } else { '' }
+    "[$($_.date) $($_.time)] $richtung | $($_.subject)$auftrag"
 }) -join "`n"
 
 $body = [ordered]@{
     model      = "anthropic--claude-sonnet-latest"
-    max_tokens = 1024
+    max_tokens = 2048
     messages   = @(
         [ordered]@{
             role    = "user"
-            content = "Fasse die folgenden Mails der Arbeitswoche kurz zusammen. Gruppiere nach Thema, hebe wichtige Action Items hervor. Antworte auf Deutsch, kompakt. Schreibe Personennamen immer kursiv im Markdown-Format (*Name*).`n`n$mailText"
+            content = "Fasse die Mails dieser Arbeitswoche zusammen. GESENDET-Mails sind meine eigenen gesendeten Nachrichten - beruecksichtige sie gleichwertig. [AUFTRAG]-Mails enthalten Aufgaben. Gruppiere nach Thema. Liste am Ende offene Auftraege separat. Deutsch, kompakt. Personennamen kursiv (*Name*).`n`n$mailText"
         }
     )
 }

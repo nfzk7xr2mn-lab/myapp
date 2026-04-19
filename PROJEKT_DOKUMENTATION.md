@@ -9,7 +9,7 @@ Vollständige Anforderungs- und Implementierungsbeschreibung. Stand: April 2026.
 Ein persönliches **Browser-Dashboard** als lokale Web-App (kein Framework, kein Build-Step), das auf einem Windows-PC läuft und folgende Informationen auf einen Blick zeigt:
 
 - Heutige **Kalender-Termine** (aus Outlook, als ICS-Datei)
-- **Fokus-Bereich** mit Lernlinks, Sporttipps und eigenen Bookmarks
+- **Fokus-Bereich** mit Sportlinks, Lernplan, Bookmarks und Hörbüchern
 - Persönliche **Action Items** mit Fälligkeitsdatum
 - **Mails der laufenden Woche** aus Outlook, priorisiert und zusammengefasst
 
@@ -30,21 +30,33 @@ C:\Users\D025095\myapp\myapp\
 ├── style.css                    # Komplettes Styling
 ├── script.js                    # Komplette Frontend-Logik
 ├── write-server.js              # Node.js Schreibserver (Port 9001)
-├── start-servers.ps1            # Startet live-server + write-server
+├── start-servers.ps1            # Startet live-server + write-server (mit Auto-Restart)
+├── restart-write-server.ps1     # Neustart write-server allein
 ├── register-write-server.ps1    # Registriert write-server als Task Scheduler Task
-├── export_outlook_today.ps1     # Exportiert heutige Kalendertermine als ICS
-├── export_outlook_mails.ps1     # Exportiert Mails der Woche als JSON
-├── summarize_mails.ps1          # Erstellt KI-Zusammenfassung via Claude API
+├── register-mail-export.ps1     # Registriert Mail-Export als Task Scheduler Task
+├── export_outlook_today.ps1     # Exportiert heutige Kalendertermine als ICS → Daten/
+├── export_outlook_mails.ps1     # Exportiert Mails der Woche als JSON → Daten/; schreibt auch Daten/config.json
+├── summarize_mails.ps1          # Erstellt KI-Zusammenfassung via Claude API → Daten/
 ├── secrets.ps1                  # API-Keys, E-Mail-Adressen, Namen (NICHT committet)
-├── .gitignore                   # secrets.ps1, *.png, *.ics, *.txt, summary*.json
+├── config.json                  # Frontend-Konfiguration: myAddresses (NICHT committet)
+├── .gitignore                   # Daten/, Wissen/, secrets.ps1, config.json
 │
-│   (Datendateien – nicht committet)
-├── actions.txt                  # Action Items
-├── learn.txt                    # Lernlinks und Sporttipps
-├── links.txt                    # Bookmark-Links
-├── termine_YYYYMMDD.ics         # Kalenderexport des jeweiligen Tages
-├── mails_heute.json             # Mails der laufenden Woche
-└── summary_KW{n}.json           # KI-Zusammenfassung der Kalenderwoche n
+├── Daten/                       # Generierte Arbeitsdaten – nicht committet
+│   ├── config.json              # myAddresses aus secrets.ps1 (auto-generiert von export_outlook_mails.ps1)
+│   ├── notizen.json             # Schnellnotizen (JSON-Array)
+│   ├── learn.txt                # Lernlinks (legacy, noch für Tab-Fallback)
+│   ├── termine.txt              # Kalender-Fallback (legacy)
+│   ├── termine_YYYYMMDD.ics     # Kalenderexport des jeweiligen Tages
+│   ├── mails_heute.json         # Mails der laufenden Woche (empfangen + gesendet)
+│   ├── export_mail.log          # Protokoll der Mail-Exportläufe
+│   └── summary_KW{n}.json       # KI-Zusammenfassung der Kalenderwoche n
+│
+└── Wissen/                      # Kuratierte Inhaltsdaten – nicht committet
+    ├── hörbuch.json             # Hörbuch-Einträge mit Kerngedanken
+    ├── links.json               # Bookmark-Links
+    ├── lernplan.json            # 6-Wochen-Lernplan (Tech + Führung, 42 Tage)
+    ├── lernplan_progress.json   # Fortschritt im Lernplan { "1": true, ... }
+    └── sport.json               # Sportlinks (kuratierte Dauerliste)
 ```
 
 ---
@@ -103,85 +115,97 @@ Jede Kachel (`div.tile`) hat:
 - Zeigt heutige Termine mit Uhrzeit und Titel
 - Laufender Termin wird **gold hervorgehoben** (`cal-current`)
 - Vergangene Termine werden **ausgegraut** (`cal-past`, opacity 0.4)
-- ICS-Datei wird automatisch beim Start geladen
+- **Ab 17 Uhr**: Vorschau der morgigen Termine unterhalb (gedimmt, `cal-tomorrow`)
+- ICS-Datei wird automatisch beim Start und alle 15 Minuten geladen (kein manueller Import)
 
-### Datei: `termine_YYYYMMDD.ics`
-- Dateiname enthält das aktuelle Datum (z.B. `termine_20260418.ics`)
-- Wird von `export_outlook_today.ps1` erzeugt
+### Datei: `Daten/termine_YYYYMMDD.ics`
+- Dateiname enthält das Datum (z.B. `termine_20260419.ics`, `termine_20260420.ics`)
+- Wird von `export_outlook_today.ps1` erzeugt — je eine Datei für heute und morgen
 - ICS-Standard, Zeiten als UTC (`Z`-Format) oder lokal
 
-### ICS-Parser (`parseICS`)
+### ICS-Parser (`parseICS(text, forDate)`)
 - Verarbeitet `BEGIN:VEVENT` / `END:VEVENT` Blöcke
-- Liest `DTSTART`, `DTEND`, `SUMMARY`
-- UTC-Zeiten werden korrekt in Lokalzeit umgerechnet
-- Nur Termine **des heutigen Tages** werden angezeigt
+- Liest `DTSTART`, `DTEND`, `SUMMARY`, `TRANSP`
+- Ganztagstermine (`DTSTART;VALUE=DATE:YYYYMMDD`, kein `T`) → `allDay: true`, werden ohne Uhrzeit angezeigt
+- UTC-Zeiten (`Z`-Suffix) werden korrekt in Lokalzeit umgerechnet
+- **Free-Termine werden gefiltert**: `TRANSP:TRANSPARENT` → wird nicht angezeigt
+- Filtert auf das übergebene Zieldatum (`forDate`), Standard: heute
 - Sortierung nach Startzeit
 
-### Auto-Load
-- `loadICSAuto()` wird beim Start und alle 15 Minuten aufgerufen
-- Dateiname wird dynamisch aus aktuellem Datum gebaut
+### Auto-Load (`loadICSAuto`)
+- Lädt beim Start und alle 15 Minuten **parallel** heute- und morgen-ICS via `Promise.allSettled`
+- Hilfsfunktion `ymdOf(date)` erzeugt den `YYYYMMDD`-Teil des Dateinamens
 - Fehler werden still ignoriert (Datei noch nicht vorhanden)
 
-### Manueller Import
-- Button "ICS importieren" öffnet `<input type="file">`
-- Validiert, ob der Dateiname das heutige Datum enthält
-- Nur `termine_YYYYMMDD.ics` für heute wird akzeptiert
-
 ### Fallback
-- Falls keine ICS-Datei vorhanden: `rawTermine` aus `termine.txt` (legacy, Zeilen `TT.MM. HH:MM-HH:MM Titel`)
+- Falls keine ICS-Datei vorhanden: `rawTermine` aus `Daten/termine.txt` (legacy)
 
 ---
 
-## 5. Kachel 2: Fokus (3 Tabs)
+## 5. Kachel 2: Fokus (6 Tabs)
 
 ### Anforderungen
-- 3 Tabs: **Lernen**, **Sport**, **Links**
-- Lernen und Sport: Einträge aus `learn.txt`, nach Kategorien getrennt, abarbeitbar mit ✕
-- Links: Bookmarks aus `links.txt`, immer sichtbar, löschbar aber nicht "erledigt"
-- "+ hinzufügen" / "+ Link" Button unten öffnet kontextsensitives Modal
+- 6 Tabs: **Notizen**, **Sport**, **Führung**, **Tech**, **Links**, **Wissen**
+- Standard-Tab **phasenabhängig** (`defaultFokusTab()`):
+  - vor 8 Uhr → Sport
+  - ab 17 Uhr → Wissen
+  - tagsüber (8–17 Uhr) → Notizen
+- Tab-Identifikation via `data-tab`-Attribut (nicht Buttontext)
+- Footer-Buttons: `+ Notiz` nur im Notizen-Tab, `+ Link` nur im Links-Tab; alle 4 Tile-Footer haben gleiche Höhe via unsichtbarem Platzhalter-Button (`border-color:transparent`) — Trennlinien liegen dadurch immer auf exakt gleicher Höhe
 
-### Dateiformat `learn.txt`
+### Tab Notizen
+- Schnellnotizen aus `Daten/notizen.json`
+- Jede Notiz: Überschrift + Datum in der Zusammenfassung — Freitext aufklappbar via `<details>`, standardmäßig geschlossen
+- Neueste Notiz oben (beim Speichern per `unshift` eingefügt)
+- ✕-Button löscht Notiz dauerhaft
+- `+ Notiz` Button öffnet Modal mit Überschrift + Textarea
+- Dateiformat `Daten/notizen.json`:
+```json
+[{"titel":"…","datum":"TT.MM.","text":"…"}]
 ```
-Kategorie | TT.MM. | URL | [x]
-```
-- Pflichtfelder: Kategorie, Datum, URL
-- 4. Feld `x` = als erledigt markiert
-- Leerzeilen werden ignoriert
+- `saveNotizenFile()` → PUT `/notizen.json` → `Daten/notizen.json`
 
-Kategorien sind fest unterteilt:
-```javascript
-WISSEN_KATS = ['Führung','Presentation','Verhandlungen','Rhetorik','KI','Naturwissenschaften']
-SPORT_KATS  = ['Dehnübungen für Frauen über 50','kurze Yogaübungen',
-               'kurze Sporteinheiten mit den eigenen Körper ohne Hilfsmittel']
+### Tab Sport
+- Zeigt alle Einträge aus `Wissen/sport.json`
+- Kein ✕-Button (kuratierte Dauerliste, kein Erledigt-Konzept)
+- Dateiformat `Wissen/sport.json`:
+```json
+[{"id":1,"title":"…","creator":"…","url":"…","category":"…"}]
 ```
+- Kategorien: `Dehnübungen für Frauen über 50`, `kurze Yogaübungen`, `kurze Sporteinheiten mit den eigenen Körper ohne Hilfsmittel`
 
-### Tab Lernen / Sport
-- Zeigt bis zu 5 aktive (nicht erledigte) Einträge der jeweiligen Kategoriegruppe
-- ✕-Button markiert Eintrag mit `x` in learn.txt und spart ihn
-- Falls keine eigenen Einträge vorhanden: `FALLBACK_LINKS` (fest kodierte Beispiel-URLs)
-- Kategorie-Badge abgekürzt (erstes Wort)
-- URL-Text: Domain + bis 40 Zeichen
+### Tab Führung
+- Flache Liste aller Lernplan-Einträge mit Führungs-Topics
+- Topics die als Führung gelten: `leadership`, `role clarity`, `mindset`, `managing managers`, `execution`, `okr`, `delivery`, `scaling`, `organization`, `vision`, `1:1s`, `feedback`, `culture`, `management`
+- Jeder Eintrag: Checkbox + Titel + Creator (gedimmt) + Link
+- Abgehakte Einträge grau + durchgestrichen
+- Fortschrittsanzeige (done/total) oben
+
+### Tab Tech
+- Flache Liste aller Lernplan-Einträge **ohne** Führungs-Topics
+- Alle übrigen Topics (LLMs, k8s, ABAP, cloud, architecture, devops, AI, RAG, …)
+- Gleiche Darstellung wie Führung-Tab
+
+### Lernplan-Fortschritt
+- Fortschritt in `Wissen/lernplan_progress.json` gespeichert: `{ "1": true, "5": true, … }`
+- `toggleLernplanDay(day, checked)` → aktualisiert State + speichert + re-rendert
+- `saveLernplanProgress()` → PUT `http://127.0.0.1:9001/lernplan_progress.json`
 
 ### Tab Links
-- Dateiformat `links.txt`: eine Zeile pro Eintrag `[Bezeichnung|URL]`
+- Dateiformat `Wissen/links.json`: Array von `{"label": "...", "url": "..."}` Objekten
 - Klick auf Bezeichnung öffnet URL in neuem Tab
-- ✕-Button **löscht** den Eintrag dauerhaft aus links.txt
-- Kein "erledigt"-Konzept: Links bleiben immer verfügbar bis gelöscht
+- ✕-Button löscht Eintrag dauerhaft
+- "+ Link" Button öffnet Modal
 
-### Modal: Lernlink hinzufügen
-- Öffnet sich bei "+ hinzufügen" im Lernen- oder Sport-Tab
-- `<select>` wird dynamisch mit WISSEN_KATS oder SPORT_KATS befüllt (je nach aktivem Tab)
-- Eingabe: Kategorie (Dropdown), URL
-
-### Modal: Link hinzufügen
-- Öffnet sich bei "+ Link" im Links-Tab
-- Eingabe: Bezeichnung (optional), URL
-- Ohne Bezeichnung wird URL als Label verwendet
+### Tab Wissen
+- Hörbücher aus `Wissen/hörbuch.json`
+- Aufklappbar: Titel → Zusammenfassung → Resümee (Kerngedanken)
 
 ### Schreiben via Write-Server
-- `saveLearnFile()` → PUT `http://127.0.0.1:9001/learn.txt`
-- `saveLinksFile()` → PUT `http://127.0.0.1:9001/links.txt`
-- Fallback bei Fehler: Browser-Download
+- `saveNotizenFile()` → PUT `/notizen.json` → `Daten/notizen.json`
+- `saveSportFile()` → PUT `/sport.json` → `Wissen/sport.json`
+- `saveLinksFile()` → PUT `/links.json` → `Wissen/links.json`
+- `saveLernplanProgress()` → PUT `/lernplan_progress.json` → `Wissen/lernplan_progress.json`
 
 ---
 
@@ -194,14 +218,16 @@ SPORT_KATS  = ['Dehnübungen für Frauen über 50','kurze Yogaübungen',
 - Erledigte Actions **der Vorwoche** werden ausgeblendet
 - Neue Action per Modal: Text + Fälligkeitsdatum
 
-### Dateiformat `actions.txt`
+### Dateiformat `Daten/actions.json`
+```json
+[
+  {"created":"19.04.","due":"19.04.2026","text":"Beschreibung","done":false}
+]
 ```
-TT.MM. | TT.MM. | Beschreibung | [x]
-```
-- Feld 1: Erstelldatum
-- Feld 2: Fälligkeitsdatum
-- Feld 3: Text
-- Feld 4: `x` = erledigt (leer = offen)
+- `created`: Erstelldatum `TT.MM.`
+- `due`: Fälligkeitsdatum `TT.MM.` oder `TT.MM.JJJJ` (beide Formate werden unterstützt)
+- `text`: Beschreibung
+- `done`: `true` = erledigt
 
 ### Farbkodierung
 - Überfällig: rot (`#e74c3c`)
@@ -209,7 +235,7 @@ TT.MM. | TT.MM. | Beschreibung | [x]
 - Offen/zukünftig: gedämpft
 
 ### Schreiben via Write-Server
-- `saveActionsFile()` → PUT `http://127.0.0.1:9001/actions.txt`
+- `saveActionsFile()` → PUT `http://127.0.0.1:9001/actions.json` → `Daten/actions.json`
 
 ---
 
@@ -224,20 +250,24 @@ TT.MM. | TT.MM. | Beschreibung | [x]
 - Kein Refresh wenn eine Mail gerade geöffnet ist (5-Min-Intervall, Pause wenn Body sichtbar)
 - KI-Zusammenfassung der Woche: auf Knopfdruck anfordern, bei Existenz direkt abrufbar
 
-### Datei: `mails_heute.json`
+### Datei: `Daten/mails_heute.json`
 JSON-Array, ein Objekt pro Mail:
 ```json
 {
   "date":    "18.04.",
   "time":    "09:42",
+  "typ":     "empfangen",
   "from":    "Reichart, Stephan",
   "to":      "Schott, Susanne",
   "cc":      "",
   "prio":    "chef",
+  "auftrag": false,
   "subject": "Betreff",
   "body":    "Mailtext (max. 300 Zeichen)"
 }
 ```
+- `typ`: `"empfangen"` oder `"gesendet"`
+- `auftrag`: `true` wenn Betreff/Body Auftrags-Keywords enthält
 
 ### Prioritätssystem
 
@@ -248,9 +278,11 @@ JSON-Array, ein Objekt pro Mail:
 | `action` | ◆      | Ich + andere in To                  | Grün (#7ecfb0), dünner Rand     |
 | `cc`     | ○      | Nur in CC                           | 60% Opacity                     |
 | `fyi`    | ·      | Nicht adressiert / Newsletter       | 38% Opacity                     |
+| `sent`   | 📤     | Gesendet                            | 75% Opacity, gedämpft           |
+
+Mails mit `auftrag: true` erhalten roten linken Rand + ⚑-Badge.
 
 ### Namenskürzung `shortName()`
-Gleiche Logik in JS und PowerShell:
 1. Starts with `DL ` oder enthält `_` oder Ziffer → **vollständig anzeigen**
 2. Format `Nachname, Vorname` → `Vorname N.`
 3. Format `Vorname Nachname` → `Vorname N.`
@@ -265,11 +297,11 @@ Mails werden ignoriert wenn Absender enthält:
 - `do.not.reply+hrwf@sap.com`
 
 ### Wochenzusammenfassung
-- Button "⟳ Zusammenfassen" löst Polling aus: prüft alle 3 Sekunden ob `summary_KW{n}.json` neuer ist als der Zeitpunkt des Klicks (bis 90 Sek. Timeout)
+- Button "⟳ Zusammenfassen" löst Polling aus: prüft alle 3 Sekunden ob `Daten/summary_KW{n}.json` neuer ist als der Zeitpunkt des Klicks (bis 90 Sek. Timeout)
 - Wenn Datei existiert und aktuell: Button "KW{n} lesen" erscheint
 - Zusammenfassung wird Markdown → HTML gerendert (h3/h4/ul/li/strong/em)
 
-### Datei: `summary_KW{n}.json`
+### Datei: `Daten/summary_KW{n}.json`
 ```json
 { "summary": "Markdown-Text...", "ts": 1776516962481 }
 ```
@@ -281,22 +313,25 @@ Mails werden ignoriert wenn Absender enthält:
 Node.js HTTP-Server, läuft lokal auf `http://127.0.0.1:9001`.
 
 ### Anforderungen
-- Nur `PUT`-Methode erlaubt
-- Nur diese 4 Dateien dürfen geschrieben werden (Allowlist):
-  - `actions.txt`
-  - `learn.txt`
-  - `termine.txt`
-  - `links.txt`
-- CORS-Header für `*` (damit Browser-Requests funktionieren)
+- `PUT`-Methode für Datei-Schreibzugriffe (Allowlist):
+
+| Dateiname              | Zielordner  |
+|------------------------|-------------|
+| `actions.json`         | `Daten/`    |
+| `notizen.json`         | `Daten/`    |
+| `learn.txt`            | `Daten/`    |
+| `termine.txt`          | `Daten/`    |
+| `links.json`           | `Wissen/`   |
+| `lernplan_progress.json` | `Wissen/` |
+| `sport.json`           | `Wissen/`   |
+
+- `POST /run-export-mails` — startet `export_outlook_mails.ps1` via `child_process.spawn`
+- `POST /run-summarize` — startet `summarize_mails.ps1` via `child_process.spawn`
+- CORS-Header für `*`
+- Lauscht nur auf `127.0.0.1`
 - UTF-8-Encoding
 
-### Registrierung als Task Scheduler Task
-Skript `register-write-server.ps1`:
-- Trigger: bei Windows-Anmeldung (`AtLogOn`)
-- Kein Ablauf-Timeout (`ExecutionTimeLimit 0`)
-- Auto-Restart: 3 Versuche, Intervall 1 Minute
-- `MultipleInstances: IgnoreNew`
-- Sofortiger Start nach Registrierung
+**Wichtig:** Der write-server muss in der interaktiven Windows-Session laufen (nicht als Dienst/SYSTEM), damit die gestarteten PowerShell-Prozesse Zugriff auf Outlook COM haben.
 
 ---
 
@@ -305,95 +340,91 @@ Skript `register-write-server.ps1`:
 ### 9.1 `secrets.ps1` (nicht committet)
 Enthält alle personenbezogenen Daten und API-Schlüssel:
 ```powershell
-$ApiKey          = "..."                # Anthropic API Key
+$ApiKey          = "..."
 $ProxyUri        = "http://localhost:9000/anthropic/v1/messages"
-$MyAddresses     = @('email1@...', 'email2@...')  # Eigene E-Mail-Adressen
-$MyDisplayNames  = @('nachname, vorname', 'vorname nachname')  # Outlook-Anzeigenamen
-$ChefNames       = @('nachname, vorname', 'vorname nachname')  # Chef-Erkennungsliste
+$MyAddresses     = @('email1@...', 'email2@...')
+$MyDisplayNames  = @('nachname, vorname', 'vorname nachname')
+$ChefNames       = @('nachname, vorname', 'vorname nachname')
 ```
-Wird in jedem Skript via `. "$PSScriptRoot\secrets.ps1"` geladen (Dot-Sourcing).
+Wird in jedem Skript via `. "$PSScriptRoot\secrets.ps1"` geladen.
+
+### 9.1b `Daten/config.json` (nicht committet, auto-generiert)
+```json
+{ "myAddresses": ["email1@...", "email2@..."] }
+```
+Wird von `export_outlook_mails.ps1` aus `$MyAddresses` (secrets.ps1) erzeugt. Wird beim App-Start per `fetch('Daten/config.json')` geladen. Keine manuelle Pflege nötig.
 
 ### 9.2 `export_outlook_today.ps1`
-- Verbindet sich mit Outlook COM (`New-Object -ComObject Outlook.Application`)
-- Liest Standard-Kalender-Ordner (`olFolderCalendar = 9`)
-- `IncludeRecurrences = $true` für Serientermine
-- Filtert auf heutigen Tag
-- Schreibt `termine_YYYYMMDD.ics` (UTC-Zeiten)
-
-Muss **manuell oder via Task Scheduler** täglich morgens laufen.
+- Verbindet sich mit Outlook COM
+- Exportiert **heute und morgen** je als eigene ICS-Datei
+- Export-Logik in `Export-DayICS`-Funktion gekapselt, wird zweimal aufgerufen
+- Ganztagstermine (`item.AllDayEvent`) → `DTSTART;VALUE=DATE:YYYYMMDD` (kein UTC-Stempel)
+- Normale Termine → UTC (`DTSTART:YYYYMMDDTHHmmssZ`)
+- Free-Termine (`item.BusyStatus -eq 0`) → `TRANSP:TRANSPARENT` wird mitgeschrieben
+- Erstellt `Daten/` automatisch falls nicht vorhanden
 
 ### 9.3 `export_outlook_mails.ps1`
-- Verbindet sich mit Outlook COM
-- Liest Standard-Posteingang (`olFolderInbox = 6`) **rekursiv** (inkl. Unterordner wie "2026")
+- Verbindet sich mit Outlook COM (benötigt interaktive Session)
+- Liest Posteingang rekursiv (inkl. Unterordner via `Restrict()`)
+- Liest Gesendete Elemente
 - Filtert: aktueller Montag bis einschließlich heute
-- Erkennt Priorität via To/CC-Feldern + `$MyAddresses`/`$MyDisplayNames`/`$ChefNames`
-- Schreibt `mails_heute.json` (UTF-8 ohne BOM, kein Kommas-Problem mit `ConvertTo-Json`)
-
-Läuft via Task Scheduler alle 15 Minuten.
+- Schreibt `Daten/mails_heute.json` (UTF-8 ohne BOM)
+- Schreibt `Daten/export_mail.log`
+- Überschreibt bestehende Datei **nicht** wenn Export 0 Mails liefert
+- Erstellt `Daten/` automatisch falls nicht vorhanden
 
 ### 9.4 `summarize_mails.ps1`
-- Liest `mails_heute.json`
-- Baut Mailtext-Liste mit gekürzten Namen (`Get-ShortName`)
-- Sendet POST an Anthropic-API (via lokalem Proxy auf Port 9000)
-- Modell: `anthropic--claude-sonnet-latest`
-- Prompt: Deutsch, nach Thema gruppieren, Action Items hervorheben, Namen kursiv (`*Name*`)
-- Schreibt `summary_KW{n}.json`
-- Body als UTF-8-Byte-Array gesendet (`[System.Text.Encoding]::UTF8.GetBytes(...)`) zur Vermeidung von Encoding-Problemen
-
-Läuft via Task Scheduler periodisch (z.B. alle 15 Minuten).
+- Liest `Daten/mails_heute.json`
+- Sendet POST an Anthropic-API (via lokalem Proxy Port 9000)
+- Modell: `anthropic--claude-sonnet-latest`, max 2048 Tokens
+- Schreibt `Daten/summary_KW{n}.json`
+- Erstellt `Daten/` automatisch falls nicht vorhanden
 
 ### 9.5 `start-servers.ps1`
-Hilfsskript: startet live-server (Port 5500) und write-server (Port 9001) in minimierten Fenstern.
+Startet live-server (Port 5500) und write-server (Port 9001). Stoppt zuvor einen laufenden write-server auf Port 9001.
+
+### 9.6 `register-mail-export.ps1`
+Registriert `export_outlook_mails.ps1` als Task Scheduler Task mit `LogonType Interactive`.
 
 ---
 
 ## 10. Refresh-Logik
 
-| Was                        | Intervall         | Bedingung                                  |
-|----------------------------|-------------------|--------------------------------------------|
-| Uhr + Header               | alle 30 Sekunden  | immer                                      |
-| ICS-Datei nachladen        | alle 15 Minuten   | immer                                      |
-| Mails nachladen            | alle 5 Minuten    | nur wenn **kein** Mail-Body gerade geöffnet |
-| Kalender-Export (PS)       | täglich morgens   | manuell oder Task Scheduler                |
-| Mail-Export (PS)           | alle 15 Minuten   | Task Scheduler                             |
-| Zusammenfassung (PS)       | periodisch        | Task Scheduler                             |
+| Was                           | Intervall         | Bedingung                                   |
+|-------------------------------|-------------------|---------------------------------------------|
+| Uhr + Header                  | alle 30 Sekunden  | immer                                       |
+| ICS-Datei nachladen           | alle 15 Minuten   | immer                                       |
+| Mails nachladen               | alle 5 Minuten    | nur wenn kein Mail-Body gerade geöffnet     |
+| Mail-Export + Zusammenfassung | auf Knopfdruck    | Button "Zusammenfassen" triggert beides     |
 
 ---
 
 ## 11. Daten-Persistenz und `.gitignore`
 
-**Nicht committet** (`.gitignore`):
+**Nicht committet:**
 ```
-*.png
-*.ics
 secrets.ps1
-termine.txt
-actions.txt
-learn.txt
-links.txt
-mails_heute.json
-summary_KW*.json
+Daten/
+Wissen/
 ```
 
 **Committet:**
 - `index.html`, `style.css`, `script.js`
 - `write-server.js`
 - Alle `.ps1` außer `secrets.ps1`
-- `.gitignore`
+- `.gitignore`, `PROJEKT_DOKUMENTATION.md`
 
 ---
 
 ## 12. Modals
 
-Drei Overlay-Modals (`.modal-overlay`), geschlossen per Klick auf den Hintergrund:
+| Modal ID        | Zweck                          | Felder                              |
+|-----------------|--------------------------------|-------------------------------------|
+| `modal-action`  | Neue Action erfassen           | Text, Fälligkeitsdatum              |
+| `modal-notiz`   | Neue Schnellnotiz erfassen     | Überschrift, Freitext (Textarea)    |
+| `modal-link`    | Neuen Bookmark-Link hinzufügen | Bezeichnung (optional), URL         |
 
-| Modal ID        | Zweck                          | Felder                          |
-|-----------------|--------------------------------|---------------------------------|
-| `modal-action`  | Neue Action erfassen           | Text, Fälligkeitsdatum          |
-| `modal-learn`   | Neuen Lernlink hinzufügen      | Kategorie (Dropdown), URL       |
-| `modal-link`    | Neuen Bookmark-Link hinzufügen | Bezeichnung (optional), URL     |
-
-Das Lernen-Modal zeigt im Dropdown nur die Kategorien des aktiven Tabs (WISSEN_KATS oder SPORT_KATS).
+Geschlossen per Klick auf den Hintergrund. Footer-Buttons je nach aktivem Tab eingeblendet.
 
 ---
 
@@ -402,7 +433,7 @@ Das Lernen-Modal zeigt im Dropdown nur die Kategorien des aktiven Tabs (WISSEN_K
 - **Niemals** API-Keys, E-Mail-Adressen oder Personennamen in committierten Dateien
 - Alle Secrets ausschließlich in `secrets.ps1` (in `.gitignore`)
 - Write-Server erlaubt nur Schreibzugriff auf explizit erlaubte Dateien (Allowlist)
-- Write-Server lauscht nur auf `127.0.0.1` (kein Netzwerkzugriff von außen)
+- Write-Server lauscht nur auf `127.0.0.1`
 
 ---
 
@@ -411,22 +442,33 @@ Das Lernen-Modal zeigt im Dropdown nur die Kategorien des aktiven Tabs (WISSEN_K
 1. Node.js installieren (für write-server)
 2. `npm install -g live-server` (oder via npx)
 3. `secrets.ps1` anlegen (Vorlage aus Abschnitt 9.1)
-4. Write-Server als Task Scheduler Task registrieren: `.\register-write-server.ps1`
-5. Task Scheduler Tasks für PS-Skripte einrichten:
+4. `config.json` anlegen (Vorlage aus Abschnitt 9.1b)
+5. Write-Server als Task Scheduler Task registrieren: `.\register-write-server.ps1`
+6. Task Scheduler Tasks für PS-Skripte einrichten:
    - `export_outlook_today.ps1` – täglich morgens
-   - `export_outlook_mails.ps1` – alle 15 Minuten
-   - `summarize_mails.ps1` – alle 15 Minuten
-6. Dashboard starten: `.\start-servers.ps1`
-7. Browser öffnen: `http://127.0.0.1:5500`
+   - `export_outlook_mails.ps1` – alle 5 Minuten (Interactive)
+7. Dashboard starten: `.\start-servers.ps1`
+8. Browser öffnen: `http://127.0.0.1:5500`
 
 ---
 
 ## 15. Bekannte Designentscheidungen und Fallstricke
 
-- **Outlook COM**: Benötigt laufendes Outlook. To-Feld enthält Anzeigenamen, nicht E-Mail-Adressen → `$MyDisplayNames` notwendig
+- **Outlook COM**: Benötigt laufendes Outlook **und** interaktive Windows-Session. Task Scheduler Tasks müssen mit `LogonType Interactive` registriert sein, sonst `CO_E_SERVER_EXEC_FAILURE (0x80080005)`
+- **write-server als COM-Proxy**: Da der Browser Outlook nicht direkt ansprechen kann, spawnt write-server PowerShell-Prozesse — deshalb muss er in der interaktiven Session laufen
+- **Keine leere JSON-Überschreibung**: `export_outlook_mails.ps1` schreibt `mails_heute.json` nur wenn Mails gefunden wurden
 - **UTF-8 ohne BOM**: JSON-Dateien müssen BOM-frei sein (`New-Object System.Text.UTF8Encoding $false`)
-- **JSON mit ConvertTo-Json**: Bei einem einzigen Objekt kein Array → explizite Array-Prüfung nötig
-- **Anthropic API via Proxy**: Läuft auf Port 9000 (separater lokaler Proxy, nicht direkt)
+- **Anthropic API via Proxy**: Läuft auf Port 9000 (separater lokaler Proxy)
 - **Kein bundler**: Alles in einer JS-Datei, kein Import/Export
-- **ICS Datumsformat**: Outlook exportiert UTC-Zeiten mit `Z`-Suffix; Parser muss beides unterstützen
-- **WEEKDAY_SHORT**: Muss als Konstante in script.js definiert sein (`['So','Mo','Di','Mi','Do','Fr','Sa']`) – fehlt sie, ist die Seite komplett leer
+- **ICS Datumsformat**: Ganztagstermine als `VALUE=DATE` (kein `T`), normale Termine UTC mit `Z`-Suffix; Parser erkennt beide Formate automatisch
+- **Free-Termine ausgeblendet**: `BusyStatus=0` → PS-Skript schreibt `TRANSP:TRANSPARENT`, Parser überspringt diese Events
+- **WEEKDAY_SHORT**: Muss als Konstante in script.js definiert sein — fehlt sie, ist die Seite leer
+- **Em-Dashes in PS-Scripts**: PowerShell-Dateien müssen ASCII-sichere Zeichen verwenden (kein `—`, kein `–`)
+- **Daten/ wird auto-erstellt**: Alle PS-Skripte prüfen ob `Daten/` existiert und legen es ggf. an
+- **Sport ist Standard-Tab**: Nur vor 8 Uhr; tagsüber Notizen, ab 17 Uhr Wissen — gesteuert via `defaultFokusTab()` in script.js
+- **Tab-Matching via data-tab**: Tabs haben `data-tab`-Attribut statt Textvergleich — wichtig bei Umlauten (Führung)
+- **Führung/Tech-Filter**: Topic-Matching gegen `FUEHRUNG_TOPICS` Set (lowercase); alles was nicht matcht → Tech-Tab
+- **sport.json kuratiert**: Sport-Tab hat kein Erledigt-Konzept — `Wissen/sport.json` ist eine Dauerliste, nicht tagesbasiert
+- **actions.json statt actions.txt**: Actions werden als JSON-Array gespeichert; `done: true` statt `x`-Flag; `due` akzeptiert `TT.MM.` und `TT.MM.JJJJ`
+- **Notizen**: neueste oben (`unshift`), geschlossen via `<details>` ohne `open`-Attribut, Freitext mit Zeilenumbrüchen (`\n` → `<br>`)
+- **Kalender-Vorschau morgen**: setzt voraus dass `termine_YYYYMMDD.ics` für den nächsten Tag existiert — wird jetzt von `export_outlook_today.ps1` erzeugt; ohne Datei bleibt die Vorschau leer

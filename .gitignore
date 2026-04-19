@@ -1,9 +1,3 @@
-*.png
-*.ics
 secrets.ps1
-termine.txt
-actions.txt
-learn.txt
-links.txt
-mails_heute.json
-summary_KW*.json
+Daten/
+Wissen/

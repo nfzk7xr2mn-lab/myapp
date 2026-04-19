@@ -8,26 +8,20 @@ const PHASES = [
   { id: 'nacht',       label: 'Nacht',      start: '22:30', end: '06:00', css: 'phase-nacht' },
 ];
 
-const WISSEN_KATS   = ['Führung','Presentation','Verhandlungen','Rhetorik','KI','Naturwissenschaften'];
-const SPORT_KATS    = ['Dehnübungen für Frauen über 50','kurze Yogaübungen','kurze Sporteinheiten mit den eigenen Körper ohne Hilfsmittel'];
-const ALL_KATS      = [...WISSEN_KATS, ...SPORT_KATS];
-
-// Fallback-Links wenn learn.txt leer
-const FALLBACK_LINKS = [
-  { kat: 'Führung',        url: 'https://www.ted.com/talks/simon_sinek_how_great_leaders_inspire_action', label: 'Simon Sinek – How great leaders inspire action' },
-  { kat: 'KI',             url: 'https://www.youtube.com/watch?v=aircAruvnKk',                            label: '3Blue1Brown – Neural Networks' },
-  { kat: 'Rhetorik',       url: 'https://www.youtube.com/watch?v=HAnw168huqA',                            label: 'TED – The art of public speaking' },
-  { kat: 'kurze Yogaübungen', url: 'https://www.youtube.com/watch?v=v7AYKMP6rOE',                        label: 'Yoga for Women 50+' },
-  { kat: 'Dehnübungen für Frauen über 50', url: 'https://www.youtube.com/watch?v=qULTwquOuT4',           label: 'Stretching for Women Over 50' },
-];
+const FUEHRUNG_TOPICS = new Set(['leadership','role clarity','mindset','managing managers',
+  'execution','okr','delivery','scaling','organization','vision','1:1s','feedback','culture','management']);
 
 // ── State ──────────────────────────────────────────────────────────────────
 let rawTermine  = '';
-let rawActions  = '';
 let rawLearn    = '';
-let rawLinks    = '';
-let icsEvents   = [];
-let aktiverFokusTab = 'lernen';
+let linksData   = [];
+let sportData   = [];
+let notizenData = [];
+let icsEvents       = [];
+let icsTomorrowEvents = [];
+let aktiverFokusTab  = 'notizen';
+let lernplanData     = null;
+let lernplanProgress = {};
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 function todayStr() {
@@ -55,39 +49,84 @@ function currentPhase() {
 function v(ms) { return ms + '?v=' + Date.now(); }
 
 // ── Load ICS automatically ─────────────────────────────────────────────────
+function ymdOf(date) {
+  return date.getFullYear().toString()
+    + (date.getMonth()+1).toString().padStart(2,'0')
+    + date.getDate().toString().padStart(2,'0');
+}
+
 async function loadICSAuto() {
-  const now = new Date();
-  const ymd = now.getFullYear().toString()
-    + (now.getMonth()+1).toString().padStart(2,'0')
-    + now.getDate().toString().padStart(2,'0');
+  const now      = new Date();
+  const tomorrow = new Date(now); tomorrow.setDate(tomorrow.getDate() + 1);
+
+  const [todayRes, tomRes] = await Promise.allSettled([
+    fetch(v(`Daten/termine_${ymdOf(now)}.ics`)),
+    fetch(v(`Daten/termine_${ymdOf(tomorrow)}.ics`)),
+  ]);
+
   try {
-    const res = await fetch(v(`termine_${ymd}.ics`));
-    if (!res.ok) return;
-    const text = await res.text();
-    const events = parseICS(text);
-    if (events.length > 0) {
-      icsEvents = events;
-      renderKalender();
+    if (todayRes.status === 'fulfilled' && todayRes.value.ok) {
+      const text   = await todayRes.value.text();
+      const events = parseICS(text, now);
+      if (events.length > 0) icsEvents = events;
     }
-  } catch(e) { /* file not yet available, silently skip */ }
+  } catch(e) {}
+
+  try {
+    if (tomRes.status === 'fulfilled' && tomRes.value.ok) {
+      const text   = await tomRes.value.text();
+      const events = parseICS(text, tomorrow);
+      if (events.length > 0) icsTomorrowEvents = events;
+    }
+  } catch(e) {}
+
+  renderKalender();
 }
 
 // ── Load data ──────────────────────────────────────────────────────────────
 async function loadAll() {
   try {
-    const [tRes, aRes, lRes, lnRes] = await Promise.all([
-      fetch(v('termine.txt')),
-      fetch(v('actions.txt')),
-      fetch(v('learn.txt')),
-      fetch(v('links.txt')),
+    const [tRes, aRes, lRes, lnRes, lpRes, lpProg, spRes, nRes] = await Promise.all([
+      fetch(v('Daten/termine.txt')),
+      fetch(v('Daten/actions.json')),
+      fetch(v('Daten/learn.txt')),
+      fetch(v('Wissen/links.json')),
+      fetch(v('Wissen/lernplan.json')),
+      fetch(v('Wissen/lernplan_progress.json')),
+      fetch(v('Wissen/sport.json')),
+      fetch(v('Daten/notizen.json')),
     ]);
-    if (tRes.ok)  rawTermine = await tRes.text();
-    if (aRes.ok)  rawActions = await aRes.text();
-    if (lRes.ok)  rawLearn   = await lRes.text();
-    if (lnRes.ok) rawLinks   = await lnRes.text();
+    if (tRes.ok)   rawTermine      = await tRes.text();
+    if (aRes.ok)   actionsData     = await aRes.json();
+    if (lRes.ok)   rawLearn        = await lRes.text();
+    if (lnRes.ok)  linksData       = await lnRes.json();
+    if (lpRes.ok)  lernplanData    = await lpRes.json();
+    if (lpProg.ok) lernplanProgress = await lpProg.json();
+    if (spRes.ok)  sportData       = await spRes.json();
+    if (nRes.ok)   notizenData     = await nRes.json();
   } catch(e) { console.error('Load error', e); }
   await loadICSAuto();
+  aktiverFokusTab = defaultFokusTab();
+  syncFokusTabUI();
   renderAll();
+}
+
+function defaultFokusTab() {
+  const h = new Date().getHours();
+  if (h < 8)  return 'sport';
+  if (h >= 17) return 'wissen';
+  return 'notizen';
+}
+
+function syncFokusTabUI() {
+  document.querySelectorAll('.fokus-tab').forEach(b =>
+    b.classList.toggle('active', b.dataset.tab === aktiverFokusTab)
+  );
+  document.getElementById('btn-add-learn').style.display = (aktiverFokusTab === 'links')   ? '' : 'none';
+  document.getElementById('btn-add-notiz').style.display = (aktiverFokusTab === 'notizen') ? '' : 'none';
+  const hasBtn = aktiverFokusTab === 'links' || aktiverFokusTab === 'notizen';
+  document.querySelector('#tile-fokus .tile-footer').classList.toggle('has-button', hasBtn);
+  document.getElementById('btn-fokus-placeholder').style.display = hasBtn ? 'none' : '';
 }
 
 // ── Save helpers (via fetch PUT — works with live-server proxy or local) ──
@@ -95,12 +134,8 @@ async function loadAll() {
 // In production replace with a small backend endpoint.
 // For now we keep changes in memory and update the DOM, and offer download.
 
-let actionLines = [];
+let actionsData = [];
 let learnLines  = [];
-
-function parseActions() {
-  actionLines = rawActions.split('\n').filter(l => l.includes('|'));
-}
 
 function parseLearn() {
   learnLines = rawLearn.split('\n').filter(l => l.trim() !== '');
@@ -124,8 +159,11 @@ async function writeFile(name, content) {
 }
 
 function saveActionsFile() {
-  rawActions = actionLines.join('\n') + '\n';
-  writeFile('actions.txt', rawActions);
+  fetch(`${WRITE_SERVER}/actions.json`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json; charset=utf-8' },
+    body: JSON.stringify(actionsData, null, 2),
+  }).catch(() => {});
 }
 
 function saveLearnFile() {
@@ -134,7 +172,32 @@ function saveLearnFile() {
 }
 
 function saveLinksFile() {
-  writeFile('links.txt', rawLinks);
+  fetch(`${WRITE_SERVER}/links.json`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json; charset=utf-8' },
+    body: JSON.stringify(linksData, null, 2),
+  }).catch(() => {
+    const a = document.createElement('a');
+    a.href = 'data:application/json;charset=utf-8,' + encodeURIComponent(JSON.stringify(linksData, null, 2));
+    a.download = 'links.json';
+    a.click();
+  });
+}
+
+function saveLernplanProgress() {
+  fetch(`${WRITE_SERVER}/lernplan_progress.json`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json; charset=utf-8' },
+    body: JSON.stringify(lernplanProgress, null, 2),
+  }).catch(() => {});
+}
+
+function saveNotizenFile() {
+  fetch(`${WRITE_SERVER}/notizen.json`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json; charset=utf-8' },
+    body: JSON.stringify(notizenData, null, 2),
+  }).catch(() => {});
 }
 
 function downloadFile(name, content) {
@@ -168,20 +231,42 @@ function renderKalender() {
 
   // Use ICS events if available, otherwise fall back to rawTermine
   if (icsEvents.length > 0) {
-    calBody.innerHTML = icsEvents.map(e => {
+    const renderEvent = (e, extraCls = '') => {
+      if (e.allDay) {
+        return `<div class="cal-item cal-allday-item${extraCls ? ' ' + extraCls : ''}">
+          <span class="cal-dot"></span>
+          <span class="cal-time" style="font-style:italic">Ganztag</span>
+          <span>${e.title}</span>
+        </div>`;
+      }
       const startMin = e.startDate.getHours() * 60 + e.startDate.getMinutes();
       const endMin   = e.endDate.getHours()   * 60 + e.endDate.getMinutes();
       const past     = curMin > endMin;
       const current  = curMin >= startMin && curMin <= endMin;
       let cls = 'cal-item';
-      if (current) cls += ' cal-current';
-      else if (past) cls += ' cal-past';
+      if (extraCls) cls += ' ' + extraCls;
+      else if (current) cls += ' cal-current';
+      else if (past)    cls += ' cal-past';
       return `<div class="${cls}">
         <span class="cal-dot"></span>
         <span class="cal-time">${fmtTime(e.startDate)}–${fmtTime(e.endDate)}</span>
         <span>${e.title}</span>
       </div>`;
-    }).join('');
+    };
+
+    // Ganztagstermine zuerst, dann normale Termine nach Zeit
+    const allDay  = icsEvents.filter(e => e.allDay);
+    const timed   = icsEvents.filter(e => !e.allDay);
+    calBody.innerHTML = [...allDay, ...timed].map(e => renderEvent(e)).join('');
+
+    if (now.getHours() >= 17 && icsTomorrowEvents.length > 0) {
+      const tomorrow = new Date(now); tomorrow.setDate(tomorrow.getDate() + 1);
+      const tomorrowLabel = tomorrow.toLocaleDateString('de-DE', { weekday:'long', day:'2-digit', month:'2-digit' });
+      const allDayTom = icsTomorrowEvents.filter(e => e.allDay);
+      const timedTom  = icsTomorrowEvents.filter(e => !e.allDay);
+      calBody.innerHTML += `<div class="cal-tomorrow-header">${tomorrowLabel}</div>`
+        + [...allDayTom, ...timedTom].map(e => renderEvent(e, 'cal-tomorrow')).join('');
+    }
     return;
   }
 
@@ -216,13 +301,12 @@ function renderKalender() {
 function switchFokusTab(tab) {
   aktiverFokusTab = tab;
   document.querySelectorAll('.fokus-tab').forEach(b =>
-    b.classList.toggle('active', b.textContent.toLowerCase() === tab ||
-      (tab === 'lernen' && b.textContent === 'Lernen') ||
-      (tab === 'sport'  && b.textContent === 'Sport')  ||
-      (tab === 'links'  && b.textContent === 'Links'))
+    b.classList.toggle('active', b.dataset.tab === tab)
   );
-  const addBtn = document.getElementById('btn-add-learn');
-  addBtn.textContent = tab === 'links' ? '+ Link' : '+ hinzufügen';
+  document.getElementById('btn-add-learn').style.display   = (tab === 'links')   ? '' : 'none';
+  document.getElementById('btn-add-notiz').style.display   = (tab === 'notizen') ? '' : 'none';
+  const hasBtn = tab === 'links' || tab === 'notizen';
+  document.querySelector('#tile-fokus .tile-footer').classList.toggle('has-button', hasBtn);
   renderFokus();
 }
 
@@ -231,95 +315,166 @@ function renderFokus() {
   const fokusBody = document.getElementById('fokus-body');
   const fokusKat  = document.getElementById('fokus-kategorie');
 
+  if (aktiverFokusTab === 'notizen') {
+    fokusKat.textContent = '';
+    renderNotizen(fokusBody);
+    return;
+  }
+
   if (aktiverFokusTab === 'links') {
     fokusKat.textContent = '';
     renderLinks(fokusBody);
     return;
   }
 
-  const isLernen = aktiverFokusTab === 'lernen';
-  const filterKats = isLernen ? WISSEN_KATS : SPORT_KATS;
-  fokusKat.textContent = isLernen ? 'Lernlinks' : 'Bewegung';
-
-  const active = learnLines.filter(l => {
-    const p = l.split('|').map(s => s.trim());
-    return p.length >= 3 && p[3] !== 'x' && filterKats.includes(p[0]);
-  });
-
-  if (!active.length) {
-    const fallbacks = FALLBACK_LINKS.filter(f => filterKats.includes(f.kat));
-    fokusBody.innerHTML = fallbacks.map((f, i) =>
-      `<div class="learn-item">
-        <span class="learn-kat" title="${f.kat}">${f.kat.split(' ')[0]}</span>
-        <a class="learn-link" href="${f.url}" target="_blank" title="${f.label}">${f.label}</a>
-        <button class="btn-x" title="Als erledigt markieren" onclick="markLearnDoneFallback(${i})">✕</button>
-      </div>`
-    ).join('');
+  if (aktiverFokusTab === 'wissen') {
+    fokusKat.textContent = 'Hörbücher';
+    renderWissen(fokusBody);
     return;
   }
 
-  fokusBody.innerHTML = active.slice(0, 5).map(line => {
-    const p   = line.split('|').map(s => s.trim());
-    const kat = p[0]; const url = p[2];
-    const label = url.replace(/https?:\/\/(www\.)?/, '').slice(0, 40);
-    const idx = learnLines.indexOf(line);
-    return `<div class="learn-item">
-      <span class="learn-kat" title="${kat}">${kat.split(' ')[0]}</span>
-      <a class="learn-link" href="${url}" target="_blank" title="${url}">${label}…</a>
-      <button class="btn-x" title="Als erledigt markieren" onclick="markLearnDone(${idx})">✕</button>
+  if (aktiverFokusTab === 'sport') {
+    fokusKat.textContent = 'Bewegung';
+    renderSportLinks(fokusBody);
+    return;
+  }
+
+  // fuehrung + tech: flat lernplan lists
+  if (lernplanData && lernplanData.weeks) {
+    const isFuehrung = aktiverFokusTab === 'fuehrung';
+    fokusKat.textContent = isFuehrung ? 'Führung & People' : 'Tech & Engineering';
+    renderLernplanFlat(fokusBody, isFuehrung);
+    return;
+  }
+
+  fokusBody.innerHTML = '<div style="color:var(--text-muted);font-size:0.75rem;padding:8px 0">Lernplan nicht geladen</div>';
+}
+
+function renderSportLinks(container) {
+  if (!sportData.length) {
+    container.innerHTML = '<div style="color:var(--text-muted);font-size:0.75rem;padding:8px 0">Keine Sportlinks vorhanden</div>';
+    return;
+  }
+  container.innerHTML = sportData.map(item =>
+    `<div class="learn-item">
+      <span class="learn-kat" title="${item.category}">${item.category.split(' ')[0]}</span>
+      <a class="learn-link" href="${item.url}" target="_blank">${item.title}${item.creator ? ' <em style="color:var(--text-muted)">– ' + item.creator + '</em>' : ''}</a>
+    </div>`
+  ).join('');
+}
+
+function renderLernplanFlat(container, isFuehrung) {
+  const allDays = lernplanData.weeks.flatMap(w => w.days);
+  const filtered = allDays.filter(d => {
+    const topics = (d.topics || []).map(t => t.toLowerCase());
+    const hasFuehrung = topics.some(t => FUEHRUNG_TOPICS.has(t));
+    return isFuehrung ? hasFuehrung : !hasFuehrung;
+  });
+  const total = filtered.length;
+  const done  = filtered.filter(d => lernplanProgress[d.day]).length;
+  let html = `<div class="lernplan-header">
+    <span class="lernplan-title">${isFuehrung ? '👥' : '⚙️'} ${total} Themen</span>
+    <span class="lernplan-total">${done}/${total}</span>
+  </div>`;
+  html += filtered.map(day => {
+    const isDone = !!lernplanProgress[day.day];
+    return `<div class="lernplan-day${isDone ? ' lernplan-done' : ''}">
+      <input type="checkbox" class="lernplan-cb" id="lp-${day.day}"
+        ${isDone ? 'checked' : ''} onchange="toggleLernplanDay(${day.day}, this.checked)">
+      <label for="lp-${day.day}">
+        <a href="${escapeHtml(day.url)}" target="_blank">
+          ${escapeHtml(day.title)} <span class="lernplan-creator">(${escapeHtml(day.creator)})</span>
+        </a>
+      </label>
     </div>`;
   }).join('');
+  container.innerHTML = html;
 }
 
 function renderLinks(container) {
-  const lines = rawLinks.split('\n').filter(l => l.trim());
-  if (!lines.length) {
+  if (!linksData.length) {
     container.innerHTML = '<div style="color:var(--text-muted);font-size:0.75rem;padding:8px 0">Keine Links gespeichert</div>';
     return;
   }
-  container.innerHTML = lines.map((l, idx) => {
-    const m = l.match(/^\[(.+?)\|(.+?)\]$/);
-    const label = m ? m[1] : l;
-    const url   = m ? m[2] : l;
-    return `<div class="learn-item">
-      <a class="learn-link" href="${escapeHtml(url)}" target="_blank" title="${escapeHtml(url)}">${escapeHtml(label)}</a>
+  container.innerHTML = linksData.map((l, idx) =>
+    `<div class="learn-item">
+      <a class="learn-link" href="${escapeHtml(l.url)}" target="_blank" title="${escapeHtml(l.url)}">${escapeHtml(l.label)}</a>
       <button class="btn-x" title="Löschen" onclick="deleteLink(${idx})">✕</button>
-    </div>`;
-  }).join('');
+    </div>`
+  ).join('');
+}
+
+function renderLernplan() {} // unused, kept for safety
+
+function renderWissen(container) {
+  fetch('Wissen/hörbuch.json')
+    .then(r => r.json())
+    .then(data => {
+      container.innerHTML = data.map(b => {
+        const gedanken = (b.kerngedanken || []).map(g =>
+          `<div class="wissen-gedanke-item">
+            <strong>${g.nr}. ${escapeHtml(g.titel)}</strong>
+            <p class="wissen-beschreibung">${escapeHtml(g.beschreibung)}</p>
+          </div>`
+        ).join('');
+        const gedankenBlock = gedanken ? `<details class="wissen-gedanke">
+          <summary>Resümee</summary>
+          <div class="wissen-gedanken">${gedanken}</div>
+        </details>` : '';
+        return `<details class="wissen-buch">
+          <summary class="wissen-buch-header">
+            <span>📖 ${escapeHtml(b.titel)}</span>
+            <span class="wissen-autor">${escapeHtml(b.autor)}</span>
+          </summary>
+          ${b.zusammenfassung ? `<p class="wissen-zusammenfassung">${escapeHtml(b.zusammenfassung)}</p>` : ''}
+          ${gedankenBlock}
+        </details>`;
+      }).join('');
+    })
+    .catch(() => {
+      container.innerHTML = '<div style="color:var(--text-muted);font-size:0.75rem;padding:8px 0">Hörbücher nicht geladen</div>';
+    });
+}
+
+function renderNotizen(container) {
+  if (!notizenData.length) {
+    container.innerHTML = '<div class="notiz-empty">Noch keine Notizen. Oben erfassen.</div>';
+    return;
+  }
+  container.innerHTML = notizenData.map((n, idx) =>
+    `<details class="notiz-item">
+      <summary class="notiz-summary">
+        <span class="notiz-titel">${escapeHtml(n.titel)}</span>
+        <span class="notiz-datum">${n.datum}</span>
+        <button class="btn-x notiz-del" title="Löschen" onclick="deleteNotiz(event,${idx})">✕</button>
+      </summary>
+      <div class="notiz-body">${escapeHtml(n.text).replace(/\n/g,'<br>')}</div>
+    </details>`
+  ).join('');
+}
+
+function deleteNotiz(e, idx) {
+  e.preventDefault();
+  e.stopPropagation();
+  notizenData.splice(idx, 1);
+  saveNotizenFile();
+  renderFokus();
+}
+
+function toggleLernplanDay(day, checked) {
+  lernplanProgress[day] = checked;
+  saveLernplanProgress();
+  if (aktiverFokusTab === 'fuehrung' || aktiverFokusTab === 'tech') renderFokus();
 }
 
 function deleteLink(idx) {
-  const lines = rawLinks.split('\n').filter(l => l.trim());
-  lines.splice(idx, 1);
-  rawLinks = lines.join('\n') + '\n';
+  linksData.splice(idx, 1);
   saveLinksFile();
-  renderFokus();
-}
-
-function markLearnDone(idx) {
-  if (learnLines[idx] === undefined) return;
-  const parts = learnLines[idx].split('|');
-  while (parts.length < 4) parts.push('');
-  parts[3] = 'x';
-  learnLines[idx] = parts.join('|');
-  saveLearnFile();
-  rawLearn = learnLines.join('\n') + '\n';
-  renderFokus();
-}
-
-function markLearnDoneFallback(idx) {
-  // just hide it
-  const item = FALLBACK_LINKS[idx];
-  const today = todayStr();
-  learnLines.push(`${item.kat} | ${today} | ${item.url} | x`);
-  saveLearnFile();
   renderFokus();
 }
 
 // ── Render Actions ─────────────────────────────────────────────────────────
 function renderActions() {
-  parseActions();
-  const today    = todayStr();
   const now      = new Date();
   const todayDate = new Date(now.getFullYear(), now.getMonth(), now.getDate());
   const dayOfWeek = todayDate.getDay();
@@ -328,20 +483,17 @@ function renderActions() {
   weekStart.setDate(weekStart.getDate() - daysToMon);
 
   function parseDateStr(s) {
-    const m = s.match(/^(\d{2})\.(\d{2})\.$/);
+    if (!s) return null;
+    const m = s.match(/^(\d{1,2})\.(\d{1,2})\.(\d{4})?$/);
     if (!m) return null;
-    return new Date(now.getFullYear(), parseInt(m[2]) - 1, parseInt(m[1]));
+    const year = m[3] ? parseInt(m[3]) : now.getFullYear();
+    return new Date(year, parseInt(m[2]) - 1, parseInt(m[1]));
   }
 
   const actionsBody  = document.getElementById('actions-body');
   const actionsCount = document.getElementById('actions-count');
 
-  // Show open actions, sorted: overdue first, then today, then future
-  const open = actionLines.filter(l => {
-    const p = l.split('|').map(s => s.trim());
-    return p[3] !== 'x';
-  });
-
+  const open = actionsData.filter(a => !a.done);
   actionsCount.textContent = `${open.length} offen`;
 
   function dueClass(dueStr) {
@@ -352,32 +504,24 @@ function renderActions() {
     return '';
   }
 
-  actionsBody.innerHTML = actionLines.map((line, idx) => {
-    const p    = line.split('|').map(s => s.trim());
-    if (p.length < 3) return '';
-    const created = p[0]; const due = p[1]; const text = p[2]; const done = p[3] === 'x';
-    // Hide completed items created before this week
-    if (done) {
-      const createdDate = parseDateStr(created);
+  actionsBody.innerHTML = actionsData.map((a, idx) => {
+    if (a.done) {
+      const createdDate = parseDateStr(a.created);
       if (createdDate && createdDate < weekStart) return '';
     }
-    const dc = dueClass(due);
-    return `<div class="action-item ${done ? 'done' : ''}" id="ai-${idx}">
-      <span class="action-due ${dc}">${due}</span>
-      <span class="action-text">${text}</span>
-      <span class="action-created">${created}</span>
-      ${!done ? `<button class="btn-x" title="Erledigt" onclick="markActionDone(${idx})">✕</button>` : ''}
+    const dc = dueClass(a.due);
+    return `<div class="action-item ${a.done ? 'done' : ''}" id="ai-${idx}">
+      <span class="action-due ${dc}">${a.due || ''}</span>
+      <span class="action-text">${a.text}</span>
+      <span class="action-created">${a.created || ''}</span>
+      ${!a.done ? `<button class="btn-x" title="Erledigt" onclick="markActionDone(${idx})">✕</button>` : ''}
     </div>`;
   }).join('');
 }
 
 function markActionDone(idx) {
-  const p = actionLines[idx].split('|').map(s => s.trim());
-  while (p.length < 4) p.push('');
-  p[3] = 'x';
-  actionLines[idx] = p.join(' | ');
+  actionsData[idx].done = true;
   saveActionsFile();
-  rawActions = actionLines.join('\n') + '\n';
   renderActions();
 }
 
@@ -391,10 +535,7 @@ document.getElementById('btn-save-action').addEventListener('click', () => {
   const text = document.getElementById('new-action-text').value.trim();
   const due  = document.getElementById('new-action-due').value.trim() || todayStr();
   if (!text) return;
-  const today = todayStr();
-  const newLine = `${today} | ${due} | ${text} | `;
-  actionLines.push(newLine);
-  rawActions = actionLines.join('\n') + '\n';
+  actionsData.push({ created: todayStr(), due, text, done: false });
   saveActionsFile();
   renderActions();
   closeModal('modal-action');
@@ -402,45 +543,39 @@ document.getElementById('btn-save-action').addEventListener('click', () => {
   document.getElementById('new-action-due').value = '';
 });
 
-// ── Modal: neuer Learn-Link ────────────────────────────────────────────────
+// ── Modal: neuer Link ────────────────────────────────────────────────────
 document.getElementById('btn-add-learn').addEventListener('click', () => {
-  if (aktiverFokusTab === 'links') {
-    document.getElementById('modal-link').style.display = 'flex';
-    document.getElementById('new-link-label').focus();
-  } else {
-    const kats = aktiverFokusTab === 'sport' ? SPORT_KATS : WISSEN_KATS;
-    const sel = document.getElementById('new-learn-kat');
-    sel.innerHTML = kats.map(k => `<option>${k}</option>`).join('');
-    document.getElementById('modal-learn').style.display = 'flex';
-    document.getElementById('new-learn-url').focus();
-  }
-});
-
-document.getElementById('btn-save-learn').addEventListener('click', () => {
-  const kat = document.getElementById('new-learn-kat').value;
-  const url = document.getElementById('new-learn-url').value.trim();
-  if (!url) return;
-  const today = todayStr();
-  const newLine = `${kat} | ${today} | ${url} | `;
-  learnLines.push(newLine);
-  rawLearn = learnLines.join('\n') + '\n';
-  saveLearnFile();
-  renderFokus();
-  closeModal('modal-learn');
-  document.getElementById('new-learn-url').value = '';
+  document.getElementById('modal-link').style.display = 'flex';
+  document.getElementById('new-link-label').focus();
 });
 
 document.getElementById('btn-save-link').addEventListener('click', () => {
   const label = document.getElementById('new-link-label').value.trim();
   const url   = document.getElementById('new-link-url').value.trim();
   if (!url) return;
-  const entry = label ? `[${label}|${url}]` : `[${url}|${url}]`;
-  rawLinks = rawLinks.trimEnd() + '\n' + entry + '\n';
+  linksData.push({ label: label || url, url });
   saveLinksFile();
   renderFokus();
   closeModal('modal-link');
   document.getElementById('new-link-label').value = '';
   document.getElementById('new-link-url').value = '';
+});
+
+document.getElementById('btn-add-notiz').addEventListener('click', () => {
+  document.getElementById('modal-notiz').style.display = 'flex';
+  document.getElementById('new-notiz-titel').focus();
+});
+
+document.getElementById('btn-save-notiz').addEventListener('click', () => {
+  const titel = document.getElementById('new-notiz-titel').value.trim();
+  const text  = document.getElementById('new-notiz-text').value.trim();
+  if (!titel && !text) return;
+  notizenData.unshift({ titel: titel || '—', datum: todayStr(), text });
+  saveNotizenFile();
+  renderFokus();
+  closeModal('modal-notiz');
+  document.getElementById('new-notiz-titel').value = '';
+  document.getElementById('new-notiz-text').value  = '';
 });
 
 function closeModal(id) {
@@ -463,27 +598,30 @@ function renderAll() {
 // ── ICS Import ─────────────────────────────────────────────────────────────
 // ── ICS Import ─────────────────────────────────────────────────────────────
 function icsDateToLocal(val) {
+  // All-day: VALUE=DATE format → 20260419 (8 chars, no T)
+  if (!val.includes('T')) {
+    const y = val.slice(0,4), mo = val.slice(4,6), d = val.slice(6,8);
+    return { allDay: true, date: new Date(+y, +mo-1, +d) };
+  }
   // UTC: 20260418T120000Z → Date object in local time
   if (val.endsWith('Z')) {
     const y = val.slice(0,4), mo = val.slice(4,6), d = val.slice(6,8);
     const h = val.slice(9,11), mi = val.slice(11,13), s = val.slice(13,15)||'00';
-    return new Date(`${y}-${mo}-${d}T${h}:${mi}:${s}Z`);
+    return { allDay: false, date: new Date(`${y}-${mo}-${d}T${h}:${mi}:${s}Z`) };
   }
   // Local/TZID: 20260418T140000 → treat as local
   const y = val.slice(0,4), mo = val.slice(4,6), d = val.slice(6,8);
   const h = val.slice(9,11), mi = val.slice(11,13);
-  return new Date(+y, +mo-1, +d, +h, +mi);
+  return { allDay: false, date: new Date(+y, +mo-1, +d, +h, +mi) };
 }
 
 function fmtTime(date) {
   return date.getHours().toString().padStart(2,'0') + ':' + date.getMinutes().toString().padStart(2,'0');
 }
 
-function parseICS(text) {
-  const now = new Date();
-  const todayYMD = now.getFullYear().toString()
-    + (now.getMonth()+1).toString().padStart(2,'0')
-    + now.getDate().toString().padStart(2,'0');
+function parseICS(text, forDate) {
+  const target = forDate || new Date();
+  const targetYMD = ymdOf(target);
 
   const lines = text.replace(/\r\n[ \t]/g, '').replace(/\r/g, '').split('\n');
   const events = [];
@@ -505,22 +643,26 @@ function parseICS(text) {
     if (baseKey === 'SUMMARY') ev.title = val.replace(/\\,/g, ',').replace(/\\n/g, ' ').trim();
     if (baseKey === 'DTSTART') ev.start = val;
     if (baseKey === 'DTEND')   ev.end   = val;
+    if (baseKey === 'TRANSP')  ev.transp = val.trim().toUpperCase();
   }
 
   const todayEvents = [];
   for (const e of events) {
     if (!e.start || !e.title) continue;
+    if (e.transp === 'TRANSPARENT') continue;  // Free/privat → ausblenden
 
-    const startDate = icsDateToLocal(e.start);
-    const endDate   = e.end ? icsDateToLocal(e.end) : startDate;
+    const startObj = icsDateToLocal(e.start);
+    const endObj   = e.end ? icsDateToLocal(e.end) : startObj;
+    const startDate = startObj.date;
+    const endDate   = endObj.date;
+    const allDay    = startObj.allDay;
 
-    // Check if event falls on today (in local time)
     const evYMD = startDate.getFullYear().toString()
       + (startDate.getMonth()+1).toString().padStart(2,'0')
       + startDate.getDate().toString().padStart(2,'0');
-    if (evYMD !== todayYMD) continue;
+    if (evYMD !== targetYMD) continue;
 
-    todayEvents.push({ startDate, endDate, title: e.title });
+    todayEvents.push({ startDate, endDate, allDay, title: e.title });
   }
 
   // Sort by start time
@@ -528,35 +670,11 @@ function parseICS(text) {
   return todayEvents;
 }
 
-document.getElementById('ics-upload').addEventListener('change', function() {
-  const file = this.files[0];
-  if (!file) return;
-
-  // Validate filename contains today's date: *_YYYYMMDD.ics
-  const now = new Date();
-  const todayYMD = now.getFullYear().toString()
-    + (now.getMonth() + 1).toString().padStart(2, '0')
-    + now.getDate().toString().padStart(2, '0');
-  if (!file.name.includes(todayYMD)) {
-    alert(`Bitte die Datei für heute laden (*_${todayYMD}.ics)`);
-    this.value = '';
-    return;
-  }
-
-  const reader = new FileReader();
-  reader.onload = e => {
-    icsEvents = parseICS(e.target.result);
-    renderKalender();
-  };
-  reader.readAsText(file, 'UTF-8');
-  this.value = '';
-});
-
 // ── Mails ──────────────────────────────────────────────────────────────────
 let mailData = [];
 let activeMailTab = null;  // currently selected date key
 
-const MY_ADDRESSES = ['susanne.schott@sap.com', 'susanne.schott.postfach@web.de'];
+let MY_ADDRESSES = [];  // loaded from config.json (not committed)
 const WEEKDAY_SHORT = ['So','Mo','Di','Mi','Do','Fr','Sa'];
 
 const PRIO_META = {
@@ -565,6 +683,7 @@ const PRIO_META = {
   action: { label: '◆',  title: 'An mich + andere',         cls: 'prio-action' },
   cc:     { label: '○',  title: 'Nur CC',                   cls: 'prio-cc'     },
   fyi:    { label: '·',  title: 'Nicht direkt adressiert',  cls: 'prio-fyi'    },
+  sent:   { label: '📤', title: 'Gesendet',                 cls: 'prio-sent'   },
 };
 
 function shortName(full) {
@@ -598,12 +717,12 @@ function mailPrio(m) {
   return m.to.split(';').filter(Boolean).length === 1 ? 'direct' : 'action';
 }
 
-async function loadMails() {
+async function loadMails(skipRender = false) {
   try {
-    const res = await fetch(v('mails_heute.json'));
+    const res = await fetch(v('Daten/mails_heute.json'));
     if (!res.ok) return;
     mailData = await res.json();
-    renderMails();
+    if (!skipRender) renderMails();
   } catch(e) { console.error('loadMails error:', e); }
   checkSummaryExists();
 }
@@ -645,13 +764,13 @@ function renderMails() {
     activeMailTab = groupMap[todayKey] ? todayKey : dates[dates.length - 1];
   }
 
-  // Render tab buttons
+  // Render tab buttons with weekday + date label
   tabs.innerHTML = dates.map(date => {
     const [d, mo] = date.split('.').map(Number);
     const year = now.getFullYear();
     const wd = WEEKDAY_SHORT[new Date(year, mo - 1, d).getDay()];
     const isActive = date === activeMailTab;
-    return `<button class="mail-tab${isActive ? ' active' : ''}" onclick="switchMailTab('${date}')">${wd}</button>`;
+    return `<button class="mail-tab${isActive ? ' active' : ''}" onclick="switchMailTab('${date}')" title="${date}">${wd} ${String(d).padStart(2,'0')}.${String(mo).padStart(2,'0')}.</button>`;
   }).join('');
 
   // Render mails for active tab
@@ -670,14 +789,17 @@ function renderMailTabContent(mails) {
     return;
   }
   body.innerHTML = mails.map((m, idx) => {
-    const id   = `mail-${activeMailTab}-${idx}`;
-    const prio = mailPrio(m);
-    const pm   = PRIO_META[prio] || PRIO_META.fyi;
-    return `<div class="mail-item ${pm.cls}" onclick="toggleMail('${id}')">
+    const id      = `mail-${activeMailTab}-${idx}`;
+    const prio    = mailPrio(m);
+    const pm      = PRIO_META[prio] || PRIO_META.fyi;
+    const isSent  = m.typ === 'gesendet';
+    const name    = isSent ? (m.to ? shortName(m.to.split(';')[0]) : '?') : shortName(m.from);
+    const auftragCls = m.auftrag ? ' mail-auftrag' : '';
+    return `<div class="mail-item ${pm.cls}${auftragCls}" onclick="toggleMail('${id}')">
       <span class="mail-prio" title="${pm.title}">${pm.label}</span>
       <span class="mail-time">${m.time}</span>
       <div class="mail-content">
-        <div class="mail-from"><em>${escapeHtml(shortName(m.from))}</em></div>
+        <div class="mail-from"><em>${escapeHtml(name)}</em>${m.auftrag ? ' <span class="auftrag-badge" title="Enthält Auftrag">⚑</span>' : ''}</div>
         <div class="mail-subject">${escapeHtml(m.subject)}</div>
         <div class="mail-body" id="${id}" style="display:none">${escapeHtml(m.body)}</div>
       </div>
@@ -689,7 +811,7 @@ async function checkSummaryExists() {
   const kw = currentKW();
   const btn = document.getElementById('btn-show-summary');
   try {
-    const res = await fetch(`summary_KW${kw}.json?v=` + Date.now());
+    const res = await fetch(`Daten/summary_KW${kw}.json?v=` + Date.now());
     if (res.ok) {
       const data = await res.json();
       if (data.summary) {
@@ -730,7 +852,7 @@ async function showSavedSummary() {
   const kw = currentKW();
   const body = document.getElementById('mails-body');
   try {
-    const res = await fetch(`summary_KW${kw}.json?v=` + Date.now());
+    const res = await fetch(`Daten/summary_KW${kw}.json?v=` + Date.now());
     const data = await res.json();
     body.innerHTML = `<div class="mail-summary">${renderSummaryHtml(data.summary)}</div>
       <button class="btn-ghost" style="margin-top:8px;font-size:0.65rem" onclick="renderMails()">← Liste anzeigen</button>`;
@@ -756,14 +878,33 @@ function currentKW() {
 }
 
 async function summarizeMails() {
-  if (!mailData.length) return;
   const body = document.getElementById('mails-body');
+  activeMailTab = null;  // reset so all tabs reload correctly after summary
+  body.innerHTML = '<div style="color:var(--text-muted);font-size:0.75rem;padding:8px 0">Mails werden abgerufen…</div>';
+
+  // 1. Export fresh mails from Outlook
+  try {
+    await fetch(`${WRITE_SERVER}/run-export-mails`, { method: 'POST' });
+  } catch(e) { /* server not available */ }
+
+  // 2. Reload mails_heute.json into mailData (no re-render)
+  await loadMails(true);
+  if (!mailData.length) {
+    body.innerHTML = '<div style="color:var(--text-muted);font-size:0.75rem;padding:8px 0">Keine Mails gefunden.</div>';
+    return;
+  }
+
   body.innerHTML = '<div style="color:var(--text-muted);font-size:0.75rem;padding:8px 0">Zusammenfassung wird erstellt… (bis zu 1 Min.)</div>';
 
+  // 3. Trigger summarize_mails.ps1
   const requestedAt = Date.now();
+  try {
+    await fetch(`${WRITE_SERVER}/run-summarize`, { method: 'POST' });
+  } catch(e) { /* server not available */ }
+
   const deadline = requestedAt + 90000;
   const kw = currentKW();
-  const summaryFile = `summary_KW${kw}.json`;
+  const summaryFile = `Daten/summary_KW${kw}.json`;
 
   const poll = async () => {
     try {
@@ -780,7 +921,7 @@ async function summarizeMails() {
     if (Date.now() < deadline) {
       setTimeout(poll, 3000);
     } else {
-      body.innerHTML = '<div style="color:#e74c3c;font-size:0.75rem;padding:8px 0">Zeitüberschreitung – bitte Task Scheduler prüfen.</div>';
+      body.innerHTML = '<div style="color:#e74c3c;font-size:0.75rem;padding:8px 0">Zeitüberschreitung – bitte write-server prüfen.</div>';
     }
   };
 
@@ -790,12 +931,15 @@ async function summarizeMails() {
 document.getElementById('btn-summarize-mails').addEventListener('click', summarizeMails);
 
 // ── Init ───────────────────────────────────────────────────────────────────
-loadAll();
-loadMails();
-setInterval(renderAll, 30000);
+fetch('Daten/config.json').then(r => r.json()).then(cfg => {
+  if (cfg.myAddresses) MY_ADDRESSES = cfg.myAddresses;
+}).catch(() => {}).finally(() => {
+  loadAll();
+  loadMails();
+});
+setInterval(renderHeader, 30000);
 setInterval(loadICSAuto, 15 * 60000);
 setInterval(() => {
-  // Don't reload mails if any mail body is currently open
   const anyOpen = document.querySelector('.mail-body[style*="display: block"], .mail-body[style*="display:block"]');
   if (!anyOpen) loadMails();
 }, 5 * 60000);

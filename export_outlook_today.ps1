@@ -1,30 +1,16 @@
-# Export today's Outlook calendar events as ICS file
+# Export today's and tomorrow's Outlook calendar events as ICS files
 # Place this script anywhere and run it before opening the dashboard.
-# The ICS file is saved to the same folder as this script.
+# The ICS files are saved to the same folder as this script.
 
-$outputDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-$today     = Get-Date
+$scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+$outputDir = Join-Path $scriptDir "Daten"
+if (-not (Test-Path $outputDir)) { New-Item -ItemType Directory -Path $outputDir | Out-Null }
 
 # ── Connect to Outlook ────────────────────────────────────────────────────
 $outlook  = New-Object -ComObject Outlook.Application
 $calendar = $outlook.Session.GetDefaultFolder(9)  # 9 = olFolderCalendar
 
-# ── Get today's appointments ──────────────────────────────────────────────
-$start = $today.Date
-$end   = $start.AddDays(1)
-
-$items = $calendar.Items
-$items.IncludeRecurrences = $true
-$items.Sort("[Start]")
-$filter = "[Start] >= '{0}' AND [Start] < '{1}'" -f `
-    $start.ToString("MM/dd/yyyy HH:mm"), `
-    $end.ToString("MM/dd/yyyy HH:mm")
-
-$todayItems = $items.Restrict($filter)
-
-# ── Build ICS ─────────────────────────────────────────────────────────────
 function To-ICSDate($dt) {
-    # Convert local time to UTC and format as ICS UTC string
     $utc = $dt.ToUniversalTime()
     return $utc.ToString("yyyyMMdd'T'HHmmss'Z'")
 }
@@ -33,37 +19,58 @@ function Escape-ICS($text) {
     return $text -replace '\\', '\\\\' -replace ';', '\;' -replace ',', '\,' -replace "`n", '\n'
 }
 
-$sb = [System.Text.StringBuilder]::new()
-[void]$sb.AppendLine("BEGIN:VCALENDAR")
-[void]$sb.AppendLine("VERSION:2.0")
-[void]$sb.AppendLine("PRODID:-//MyApp Dashboard//DE")
-[void]$sb.AppendLine("CALSCALE:GREGORIAN")
+function Export-DayICS($day) {
+    $start = $day.Date
+    $end   = $start.AddDays(1)
 
-foreach ($item in $todayItems) {
-    try {
-        $dtStart = To-ICSDate $item.Start
-        $dtEnd   = To-ICSDate $item.End
-        $summary = Escape-ICS $item.Subject
-        $uid     = [System.Guid]::NewGuid().ToString()
+    $items = $calendar.Items
+    $items.IncludeRecurrences = $true
+    $items.Sort("[Start]")
+    $filter = "[Start] >= '{0}' AND [Start] < '{1}'" -f `
+        $start.ToString("MM/dd/yyyy HH:mm"), `
+        $end.ToString("MM/dd/yyyy HH:mm")
+    $dayItems = $items.Restrict($filter)
 
-        [void]$sb.AppendLine("BEGIN:VEVENT")
-        [void]$sb.AppendLine("DTSTART:$dtStart")
-        [void]$sb.AppendLine("DTEND:$dtEnd")
-        [void]$sb.AppendLine("SUMMARY:$summary")
-        [void]$sb.AppendLine("UID:$uid")
-        [void]$sb.AppendLine("END:VEVENT")
-    } catch {
-        Write-Warning "Skipping item: $_"
+    $sb = [System.Text.StringBuilder]::new()
+    [void]$sb.AppendLine("BEGIN:VCALENDAR")
+    [void]$sb.AppendLine("VERSION:2.0")
+    [void]$sb.AppendLine("PRODID:-//MyApp Dashboard//DE")
+    [void]$sb.AppendLine("CALSCALE:GREGORIAN")
+
+    foreach ($item in $dayItems) {
+        try {
+            $summary = Escape-ICS $item.Subject
+            $uid     = [System.Guid]::NewGuid().ToString()
+
+            [void]$sb.AppendLine("BEGIN:VEVENT")
+            if ($item.AllDayEvent) {
+                [void]$sb.AppendLine("DTSTART;VALUE=DATE:" + $item.Start.ToString("yyyyMMdd"))
+                [void]$sb.AppendLine("DTEND;VALUE=DATE:"   + $item.End.ToString("yyyyMMdd"))
+            } else {
+                [void]$sb.AppendLine("DTSTART:" + (To-ICSDate $item.Start))
+                [void]$sb.AppendLine("DTEND:"   + (To-ICSDate $item.End))
+            }
+            [void]$sb.AppendLine("SUMMARY:$summary")
+            [void]$sb.AppendLine("UID:$uid")
+            # BusyStatus 0=Free → TRANSP:TRANSPARENT (wird im Dashboard gefiltert)
+            if ($item.BusyStatus -eq 0) { [void]$sb.AppendLine("TRANSP:TRANSPARENT") }
+            [void]$sb.AppendLine("END:VEVENT")
+        } catch {
+            Write-Warning "Skipping item: $_"
+        }
     }
+
+    [void]$sb.AppendLine("END:VCALENDAR")
+
+    $dateStr  = $day.ToString("yyyyMMdd")
+    $filePath = Join-Path $outputDir "termine_$dateStr.ics"
+    [System.IO.File]::WriteAllText($filePath, $sb.ToString(), [System.Text.Encoding]::UTF8)
+
+    $count = ($dayItems | Measure-Object).Count
+    Write-Host "Exported $count events to: $filePath" -ForegroundColor Green
 }
 
-[void]$sb.AppendLine("END:VCALENDAR")
-
-# ── Save file ─────────────────────────────────────────────────────────────
-$dateStr      = $today.ToString("yyyyMMdd")
-$filePathDate = Join-Path $outputDir "termine_$dateStr.ics"
-
-[System.IO.File]::WriteAllText($filePathDate, $sb.ToString(), [System.Text.Encoding]::UTF8)
-
-$count = ($todayItems | Measure-Object).Count
-Write-Host "Exported $count events to: $filePathDate" -ForegroundColor Green
+# ── Export today and tomorrow ──────────────────────────────────────────────
+$today    = Get-Date
+Export-DayICS $today
+Export-DayICS $today.AddDays(1)

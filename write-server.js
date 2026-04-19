@@ -1,23 +1,47 @@
-// Local write server – allows the dashboard to save actions.txt, learn.txt, termine.txt
-// Runs on http://localhost:9001
-// Start: node write-server.js  (or via start-servers.ps1)
-
-const http = require('http');
-const fs   = require('fs');
-const path = require('path');
+const http  = require('http');
+const fs    = require('fs');
+const path  = require('path');
+const { spawn } = require('child_process');
 
 const PORT    = 9001;
 const APP_DIR = __dirname;
 
-// Only these files may be written
-const ALLOWED = new Set(['actions.txt', 'learn.txt', 'termine.txt', 'links.txt']);
+const ALLOWED = new Set(['actions.json', 'actions.txt', 'learn.txt', 'termine.txt', 'links.json', 'lernplan_progress.json', 'sport.json', 'notizen.json']);
 
 const server = http.createServer((req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'PUT, OPTIONS');
+  res.setHeader('Access-Control-Allow-Methods', 'PUT, POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 
   if (req.method === 'OPTIONS') { res.writeHead(204); res.end(); return; }
+
+  // Trigger summarize_mails.ps1
+  if (req.method === 'POST' && req.url === '/run-summarize') {
+    const ps = spawn('powershell.exe', [
+      '-NonInteractive', '-NoProfile', '-ExecutionPolicy', 'Bypass',
+      '-File', path.join(APP_DIR, 'summarize_mails.ps1')
+    ]);
+    ps.on('close', code => {
+      if (code === 0) { res.writeHead(200); res.end('OK'); }
+      else            { res.writeHead(500); res.end(`Exit code ${code}`); }
+    });
+    ps.on('error', err => { res.writeHead(500); res.end(err.message); });
+    return;
+  }
+
+  // Trigger export_outlook_mails.ps1
+  if (req.method === 'POST' && req.url === '/run-export-mails') {
+    const ps = spawn('powershell.exe', [
+      '-NonInteractive', '-NoProfile', '-ExecutionPolicy', 'Bypass',
+      '-File', path.join(APP_DIR, 'export_outlook_mails.ps1')
+    ]);
+    ps.on('close', code => {
+      if (code === 0) { res.writeHead(200); res.end('OK'); }
+      else            { res.writeHead(500); res.end(`Exit code ${code}`); }
+    });
+    ps.on('error', err => { res.writeHead(500); res.end(err.message); });
+    return;
+  }
 
   if (req.method !== 'PUT') {
     res.writeHead(405); res.end('Method Not Allowed'); return;
@@ -28,7 +52,10 @@ const server = http.createServer((req, res) => {
     res.writeHead(403); res.end('Forbidden'); return;
   }
 
-  const filePath = path.join(APP_DIR, filename);
+  const subdir   = ['links.json', 'lernplan_progress.json', 'sport.json'].includes(filename) ? 'Wissen'
+                 : ['actions.json','actions.txt','learn.txt','termine.txt','notizen.json'].includes(filename) ? 'Daten'
+                 : '';
+  const filePath = subdir ? path.join(APP_DIR, subdir, filename) : path.join(APP_DIR, filename);
   let body = '';
   req.on('data', chunk => body += chunk);
   req.on('end', () => {
