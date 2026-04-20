@@ -7,7 +7,7 @@ $script = "$appDir\export_outlook_mails.ps1"
 
 $action  = New-ScheduledTaskAction `
     -Execute $ps `
-    -Argument "-NonInteractive -NoProfile -ExecutionPolicy Bypass -File `"$script`"" `
+    -Argument "-NonInteractive -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$script`"" `
     -WorkingDirectory $appDir
 
 $trigger  = New-ScheduledTaskTrigger -RepetitionInterval (New-TimeSpan -Minutes 5) -Once `

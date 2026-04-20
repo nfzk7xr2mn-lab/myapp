@@ -497,6 +497,7 @@ function editNotiz(e, idx) {
   document.getElementById('new-notiz-text').value  = n.text;
   document.getElementById('modal-notiz').style.display = '';
   document.getElementById('modal-notiz').dataset.editIdx = idx;
+  setModalLock();
   document.getElementById('new-notiz-titel').focus();
 }
 
@@ -561,6 +562,7 @@ function renderActions() {
       <span class="action-due ${dc}">${a.due || ''}</span>
       <span class="action-text">${linkify(a.text)}</span>
       <span class="action-created">${a.created || ''}</span>
+      ${!a.done ? `<button class="btn-x btn-edit-action" title="Bearbeiten" onclick="editAction(${idx})">✎</button>` : ''}
       ${!a.done ? `<button class="btn-x" title="Erledigt" onclick="markActionDone(${idx})">✕</button>` : ''}
     </div>`;
   }).join('');
@@ -572,27 +574,47 @@ function markActionDone(idx) {
   renderActions();
 }
 
+function editAction(idx) {
+  const a = actionsData[idx];
+  document.getElementById('new-action-text').value = a.text;
+  document.getElementById('new-action-due').value  = a.due || '';
+  const modal = document.getElementById('modal-action');
+  modal.style.display = 'flex';
+  modal.dataset.editIdx = idx;
+  setModalLock();
+  document.getElementById('new-action-text').focus();
+}
+
 // ── Modal: neue Action ─────────────────────────────────────────────────────
 document.getElementById('btn-add-action').addEventListener('click', () => {
   document.getElementById('modal-action').style.display = 'flex';
   document.getElementById('new-action-text').focus();
+  setModalLock();
 });
 
 document.getElementById('btn-save-action').addEventListener('click', () => {
-  const text = document.getElementById('new-action-text').value.trim();
-  const due  = document.getElementById('new-action-due').value.trim() || todayStr();
+  const text  = document.getElementById('new-action-text').value.trim();
+  const due   = document.getElementById('new-action-due').value.trim() || todayStr();
   if (!text) return;
-  actionsData.push({ created: todayStr(), due, text, done: false });
+  const modal   = document.getElementById('modal-action');
+  const editIdx = modal.dataset.editIdx !== undefined ? parseInt(modal.dataset.editIdx) : -1;
+  if (editIdx >= 0) {
+    actionsData[editIdx] = { ...actionsData[editIdx], text, due };
+    delete modal.dataset.editIdx;
+  } else {
+    actionsData.push({ created: todayStr(), due, text, done: false });
+  }
   saveActionsFile();
   renderActions();
   closeModal('modal-action');
   document.getElementById('new-action-text').value = '';
-  document.getElementById('new-action-due').value = '';
+  document.getElementById('new-action-due').value  = '';
 });
 
 // ── Modal: neuer Link ────────────────────────────────────────────────────
 document.getElementById('btn-add-learn').addEventListener('click', () => {
   document.getElementById('modal-link').style.display = 'flex';
+  setModalLock();
   document.getElementById('new-link-label').focus();
 });
 
@@ -610,6 +632,7 @@ document.getElementById('btn-save-link').addEventListener('click', () => {
 
 document.getElementById('btn-add-notiz').addEventListener('click', () => {
   document.getElementById('modal-notiz').style.display = 'flex';
+  setModalLock();
   document.getElementById('new-notiz-titel').focus();
 });
 
@@ -637,6 +660,7 @@ function openSyncModal(file, name) {
   const body = document.getElementById('modal-sync-body');
   body.innerHTML = '<div style="color:var(--text-muted);font-size:0.75rem;padding:8px 0">Lade…</div>';
   document.getElementById('modal-sync').style.display = '';
+  setModalLock();
   fetch('Daten/' + file)
     .then(r => r.json())
     .then(mails => {
@@ -667,6 +691,14 @@ function closeModal(id) {
   const el = document.getElementById(id);
   el.style.display = 'none';
   delete el.dataset.editIdx;
+  // Prüfen ob noch andere Modals offen sind
+  const anyOpen = document.querySelectorAll('.modal-overlay');
+  const stillOpen = [...anyOpen].some(m => m.style.display !== 'none');
+  if (!stillOpen) fetch('http://127.0.0.1:9001/modal-lock?state=0', { method: 'POST' }).catch(() => {});
+}
+
+function setModalLock() {
+  fetch('http://127.0.0.1:9001/modal-lock?state=1', { method: 'POST' }).catch(() => {});
 }
 
 // Close modal on overlay click
@@ -766,6 +798,7 @@ function parseICS(text, forDate) {
 // ── Mails ──────────────────────────────────────────────────────────────────
 let mailData = [];
 let activeMailTab = null;  // currently selected date key
+let activeHistoryKW = null;
 
 let MY_ADDRESSES = [];  // loaded from config.json (not committed)
 const WEEKDAY_SHORT = ['So','Mo','Di','Mi','Do','Fr','Sa'];
@@ -864,7 +897,7 @@ function renderMails() {
     const wd = WEEKDAY_SHORT[new Date(year, mo - 1, d).getDay()];
     const isActive = date === activeMailTab;
     return `<button class="mail-tab${isActive ? ' active' : ''}" onclick="switchMailTab('${date}')" title="${date}">${wd} ${String(d).padStart(2,'0')}.${String(mo).padStart(2,'0')}.</button>`;
-  }).join('');
+  }).join('') + `<button class="mail-tab mail-tab-history" onclick="renderHistory()" title="Wochenzusammenfassungen">📋</button>`;
 
   // Render mails for active tab
   renderMailTabContent(groupMap[activeMailTab] || []);
@@ -955,6 +988,65 @@ async function showSavedSummary() {
 }
 
 document.getElementById('btn-show-summary').addEventListener('click', showSavedSummary);
+
+// ── History Tab ────────────────────────────────────────────────────────────
+async function renderHistory() {
+  const body  = document.getElementById('mails-body');
+  const tabs  = document.getElementById('mail-tabs');
+  const count = document.getElementById('mails-count');
+
+  // Mark history tab active
+  tabs.querySelectorAll('.mail-tab').forEach(b => b.classList.remove('active'));
+  tabs.querySelector('.mail-tab-history').classList.add('active');
+  count.textContent = 'History';
+
+  // Try last 20 KWs
+  const kwNow = currentKW();
+  const yearNow = new Date().getFullYear();
+  const candidates = [];
+  for (let i = 0; i < 20; i++) {
+    let kw = kwNow - i;
+    let yr = yearNow;
+    if (kw <= 0) { kw += 52; yr -= 1; }
+    candidates.push({ kw, yr });
+  }
+
+  const results = await Promise.all(candidates.map(async ({ kw, yr }) => {
+    try {
+      const res = await fetch(`Daten/summary_KW${kw}.json?v=` + Date.now());
+      if (!res.ok) return null;
+      const data = await res.json();
+      if (!data.summary) return null;
+      return { kw, yr, summary: data.summary };
+    } catch { return null; }
+  }));
+
+  const found = results.filter(Boolean);
+  if (!found.length) {
+    body.innerHTML = '<div style="color:var(--text-muted);font-size:0.75rem;padding:8px 0">Keine Zusammenfassungen gefunden.</div>';
+    return;
+  }
+
+  if (!activeHistoryKW) activeHistoryKW = found[0].kw;
+
+  const kwTabs = found.map(({ kw }) =>
+    `<button class="mail-tab${kw === activeHistoryKW ? ' active' : ''}" onclick="switchHistoryKW(${kw})">KW ${kw}</button>`
+  ).join('');
+
+  const current = found.find(f => f.kw === activeHistoryKW) || found[0];
+  activeHistoryKW = current.kw;
+
+  body.innerHTML = `
+    <div class="history-kw-tabs">${kwTabs}</div>
+    <div class="mail-summary">${renderSummaryHtml(current.summary)}</div>
+    <button class="btn-ghost" style="margin-top:8px;font-size:0.65rem" onclick="activeMailTab=null;renderMails()">← Mails anzeigen</button>
+  `;
+}
+
+function switchHistoryKW(kw) {
+  activeHistoryKW = kw;
+  renderHistory();
+}
 
 function toggleMail(id) {
   const el = document.getElementById(id);

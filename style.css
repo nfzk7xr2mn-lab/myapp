@@ -337,6 +337,7 @@ body.phase-nacht      { background: radial-gradient(ellipse at top, #080c18 0%, 
   transition: all 0.15s;
 }
 .btn-x:hover { border-color: #c0392b; color: #c0392b; }
+.btn-edit-action:hover { border-color: var(--gold) !important; color: var(--gold) !important; }
 
 /* ── Action Items ─────────────────────────────────────────────────────── */
 .action-item {
@@ -576,6 +577,20 @@ body.phase-nacht      { background: radial-gradient(ellipse at top, #080c18 0%, 
   background: rgba(201,168,76,0.08);
   border-color: var(--tile-border);
   border-bottom-color: transparent;
+}
+.mail-tab-history { margin-left: auto; opacity: 0.6; }
+.mail-tab-history:hover { opacity: 1; }
+.mail-tab-history.active { opacity: 1; }
+
+.history-kw-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-bottom: 10px;
+}
+.history-kw-tabs .mail-tab {
+  border-radius: 8px;
+  border-bottom: 1px solid var(--tile-border);
 }
 
 /* ── Mail Summary ──────────────────────────────────────────────────────────── */

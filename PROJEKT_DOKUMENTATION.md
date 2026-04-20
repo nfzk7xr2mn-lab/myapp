@@ -239,6 +239,7 @@ Jede Kachel (`div.tile`) hat:
 - Erledigte Actions dieser Woche werden angezeigt (durchgestrichen, transparent)
 - Erledigte Actions **der Vorwoche** werden ausgeblendet
 - Neue Action per Modal: Text + Fälligkeitsdatum
+- Bestehende Actions per ✎-Button bearbeiten (Text + Fälligkeitsdatum änderbar, Erstelldatum bleibt erhalten)
 
 ### Dateiformat `Daten/actions.json`
 ```json
@@ -323,6 +324,12 @@ Mails werden ignoriert wenn Absender enthält:
 - Button "⟳ Zusammenfassen" löst Polling aus: prüft alle 3 Sekunden ob `Daten/summary_KW{n}.json` neuer ist als der Zeitpunkt des Klicks (bis 90 Sek. Timeout)
 - Wenn Datei existiert und aktuell: Button "KW{n} lesen" erscheint
 - Zusammenfassung wird Markdown → HTML gerendert (h3/h4/ul/li/strong/em)
+
+### History-Tab
+- Fixer 📋-Tab ganz rechts in der Mail-Tab-Leiste
+- Lädt alle verfügbaren `summary_KW{n}.json`-Dateien (sucht die letzten 20 KWs rückwärts)
+- KW-Auswahl innerhalb der History-Ansicht
+- Zurück zur Mail-Liste per "← Mails anzeigen"-Button
 
 ### Datei: `Daten/summary_KW{n}.json`
 ```json
@@ -424,7 +431,7 @@ Wird von `export_outlook_mails.ps1` aus `$MyAddresses` (secrets.ps1) erzeugt. Wi
 - Erstellt `Daten/` automatisch falls nicht vorhanden
 
 ### 9.6 `start-servers.ps1`
-Startet live-server (Port 5500) und write-server (Port 9001). Stoppt zuvor einen laufenden write-server auf Port 9001.
+Startet live-server (Port 5500) und write-server (Port 9001). Stoppt zuvor **beide** laufenden Prozesse auf Port 5500 und 9001 (vorher nur Port 9001).
 
 ### 9.7 `register-mail-export.ps1`
 Registriert `export_outlook_mails.ps1` als Task Scheduler Task mit `LogonType Interactive`.
@@ -461,12 +468,12 @@ Wissen/
 
 ## 12. Modals
 
-| Modal ID        | Zweck                          | Felder                              |
-|-----------------|--------------------------------|-------------------------------------|
-| `modal-action`  | Neue Action erfassen           | Text, Fälligkeitsdatum              |
-| `modal-notiz`   | Neue Schnellnotiz erfassen     | Überschrift, Freitext (Textarea)    |
-| `modal-link`    | Neuen Bookmark-Link hinzufügen | Bezeichnung (optional), URL         |
-| `modal-sync`    | Sync-Mails anzeigen            | Read-only, Mail-Liste aus KW{n}-{Vorname}.json |
+| Modal ID        | Zweck                                    | Felder                              |
+|-----------------|------------------------------------------|-------------------------------------|
+| `modal-action`  | Action erfassen **oder bearbeiten**      | Text, Fälligkeitsdatum              |
+| `modal-notiz`   | Neue Schnellnotiz erfassen               | Überschrift, Freitext (Textarea)    |
+| `modal-link`    | Neuen Bookmark-Link hinzufügen           | Bezeichnung (optional), URL         |
+| `modal-sync`    | Sync-Mails anzeigen                      | Read-only, Mail-Liste aus KW{n}-{Vorname}.json |
 
 Geschlossen per Klick auf den Hintergrund. Footer-Buttons je nach aktivem Tab eingeblendet.
 
@@ -511,6 +518,7 @@ Geschlossen per Klick auf den Hintergrund. Footer-Buttons je nach aktivem Tab ei
 - **PowerShell case-insensitiv**: `$SyncPersonen` und `$syncPersonen` sind dieselbe Variable — Akkumulator muss anders heißen (z.B. `$gefunden`).
 - **Kalender-Restrict() funktioniert weiterhin** mit klassischem Format — nur Mail-Ordner brauchen DASL.
 - **Em-Dashes in PS-Scripts**: PowerShell-Dateien müssen ASCII-sichere Zeichen verwenden (kein `—`, kein `–`)
+- **modal.lock liegt in `C:\Temp\`**: Die Lock-Datei `myapp-modal.lock` wird in `C:\Temp\` geschrieben (nicht in `Daten/`), damit live-server sie nicht erkennt und keinen Seiten-Reload auslöst. Alle PS-Skripte prüfen entsprechend `C:\Temp\myapp-modal.lock`. `C:\Temp` muss existieren.
 - **Daten/ wird auto-erstellt**: Alle PS-Skripte prüfen ob `Daten/` existiert und legen es ggf. an
 - **Sport ist Standard-Tab**: Nur vor 8 Uhr; tagsüber Notizen, ab 17 Uhr Wissen — gesteuert via `defaultFokusTab()` in script.js
 - **Tab-Matching via data-tab**: Tabs haben `data-tab`-Attribut statt Textvergleich — wichtig bei Umlauten (Führung)

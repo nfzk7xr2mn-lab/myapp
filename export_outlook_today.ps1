@@ -6,6 +6,11 @@ $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $outputDir = Join-Path $scriptDir "Daten"
 if (-not (Test-Path $outputDir)) { New-Item -ItemType Directory -Path $outputDir | Out-Null }
 
+if (Test-Path "C:\Temp\myapp-modal.lock") {
+    Write-Host "Modal offen – Export übersprungen." -ForegroundColor Yellow
+    exit
+}
+
 # ── Connect to Outlook ────────────────────────────────────────────────────
 $outlook  = New-Object -ComObject Outlook.Application
 $calendar = $outlook.Session.GetDefaultFolder(9)  # 9 = olFolderCalendar

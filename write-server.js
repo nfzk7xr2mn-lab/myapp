@@ -15,6 +15,18 @@ const server = http.createServer((req, res) => {
 
   if (req.method === 'OPTIONS') { res.writeHead(204); res.end(); return; }
 
+  // Modal lock: state=1 → lock schreiben, state=0 → lock löschen
+  if (req.method === 'POST' && req.url.startsWith('/modal-lock')) {
+    const state = new URL(req.url, 'http://localhost').searchParams.get('state');
+    const lockPath = path.join('C:\\Temp', 'myapp-modal.lock');
+    if (state === '1') {
+      fs.writeFile(lockPath, '', () => { res.writeHead(200); res.end('locked'); });
+    } else {
+      fs.unlink(lockPath, () => { res.writeHead(200); res.end('unlocked'); });
+    }
+    return;
+  }
+
   // Trigger summarize_mails.ps1
   if (req.method === 'POST' && req.url === '/run-summarize') {
     const ps = spawn('powershell.exe', [

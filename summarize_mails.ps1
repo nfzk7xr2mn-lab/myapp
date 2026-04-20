@@ -6,6 +6,11 @@
 $scriptDir  = Split-Path -Parent $MyInvocation.MyCommand.Path
 $outputDir  = Join-Path $scriptDir "Daten"
 if (-not (Test-Path $outputDir)) { New-Item -ItemType Directory -Path $outputDir | Out-Null }
+
+if (Test-Path "C:\Temp\myapp-modal.lock") {
+    Write-Host "Modal offen – Zusammenfassung übersprungen." -ForegroundColor Yellow
+    exit
+}
 $mailsFile  = Join-Path $outputDir "mails_heute.json"
 
 # Calendar week number

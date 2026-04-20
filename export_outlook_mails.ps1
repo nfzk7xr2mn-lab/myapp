@@ -7,6 +7,11 @@ $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $outputDir = Join-Path $scriptDir "Daten"
 if (-not (Test-Path $outputDir)) { New-Item -ItemType Directory -Path $outputDir | Out-Null }
 
+if (Test-Path "C:\Temp\myapp-modal.lock") {
+    Write-Host "Modal offen – Export übersprungen." -ForegroundColor Yellow
+    exit
+}
+
 # Write config.json from secrets so script.js can load myAddresses without committing them
 $configPath = Join-Path $outputDir "config.json"
 $configObj  = @{ myAddresses = $MyAddresses } | ConvertTo-Json -Compress
