@@ -1,19 +1,17 @@
 # Export today's and tomorrow's Outlook calendar events as ICS files
-# Place this script anywhere and run it before opening the dashboard.
-# The ICS files are saved to the same folder as this script.
 
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $outputDir = Join-Path $scriptDir "Daten"
 if (-not (Test-Path $outputDir)) { New-Item -ItemType Directory -Path $outputDir | Out-Null }
 
 if (Test-Path "C:\Temp\myapp-modal.lock") {
-    Write-Host "Modal offen – Export übersprungen." -ForegroundColor Yellow
+    Write-Host "Modal offen - Export uebersprungen." -ForegroundColor Yellow
     exit
 }
 
-# ── Connect to Outlook ────────────────────────────────────────────────────
 $outlook  = New-Object -ComObject Outlook.Application
-$calendar = $outlook.Session.GetDefaultFolder(9)  # 9 = olFolderCalendar
+try {
+$calendar = $outlook.Session.GetDefaultFolder(9)
 
 function To-ICSDate($dt) {
     $utc = $dt.ToUniversalTime()
@@ -31,9 +29,7 @@ function Export-DayICS($day) {
     $items = $calendar.Items
     $items.IncludeRecurrences = $true
     $items.Sort("[Start]")
-    $filter = "[Start] >= '{0}' AND [Start] < '{1}'" -f `
-        $start.ToString("MM/dd/yyyy HH:mm"), `
-        $end.ToString("MM/dd/yyyy HH:mm")
+    $filter = "[Start] >= '" + $start.ToString("MM/dd/yyyy HH:mm") + "' AND [Start] < '" + $end.ToString("MM/dd/yyyy HH:mm") + "'"
     $dayItems = $items.Restrict($filter)
 
     $sb = [System.Text.StringBuilder]::new()
@@ -57,8 +53,19 @@ function Export-DayICS($day) {
             }
             [void]$sb.AppendLine("SUMMARY:$summary")
             [void]$sb.AppendLine("UID:$uid")
-            # BusyStatus 0=Free → TRANSP:TRANSPARENT (wird im Dashboard gefiltert)
+            # BusyStatus: 0=Free, 1=Tentative, 2=Busy, 3=OOF, 4=WorkingElsewhere
             if ($item.BusyStatus -eq 0) { [void]$sb.AppendLine("TRANSP:TRANSPARENT") }
+            if ($item.BusyStatus -eq 1) { [void]$sb.AppendLine("X-MICROSOFT-CDO-BUSYSTATUS:TENTATIVE") }
+            # ResponseStatus: 0=None,1=Organized,2=Tentative,3=Accepted,4=Declined,5=NotResponded
+            # MeetingStatus: 0=NonMeeting,1=Meeting,3=Received,5=Cancelled,7=ReceivedCancelled
+            try {
+                if ($item.MeetingStatus -gt 0) {
+                    $role = if ($item.IsConflict -eq $false -and $item.OptionalAttendees -match [regex]::Escape($outlook.Session.CurrentUser.Name)) {
+                        "OPT-PARTICIPANT"
+                    } else { "REQ-PARTICIPANT" }
+                    [void]$sb.AppendLine("X-MYAPP-ROLE:$role")
+                }
+            } catch {}
             [void]$sb.AppendLine("END:VEVENT")
         } catch {
             Write-Warning "Skipping item: $_"
@@ -75,7 +82,9 @@ function Export-DayICS($day) {
     Write-Host "Exported $count events to: $filePath" -ForegroundColor Green
 }
 
-# ── Export today and tomorrow ──────────────────────────────────────────────
-$today    = Get-Date
+$today = Get-Date
 Export-DayICS $today
 Export-DayICS $today.AddDays(1)
+} finally {
+    if ($outlook) { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($outlook) | Out-Null }
+}

@@ -3,10 +3,14 @@ const fs    = require('fs');
 const path  = require('path');
 const { spawn } = require('child_process');
 
+const POWERSHELL = process.env.SystemRoot
+  ? process.env.SystemRoot + '\\System32\\WindowsPowerShell\\v1.0\\powershell.exe'
+  : 'powershell.exe';
+
 const PORT    = 9001;
 const APP_DIR = __dirname;
 
-const ALLOWED = new Set(['actions.json', 'actions.txt', 'learn.txt', 'termine.txt', 'links.json', 'lernplan_progress.json', 'sport.json', 'notizen.json']);
+const ALLOWED = new Set(['actions.json', 'learn.txt', 'termine.txt', 'links.json', 'lernplan_progress.json', 'sport.json', 'notizen.json']);
 
 const server = http.createServer((req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -14,6 +18,10 @@ const server = http.createServer((req, res) => {
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 
   if (req.method === 'OPTIONS') { res.writeHead(204); res.end(); return; }
+
+  if (req.method === 'GET' && req.url === '/ping') {
+    res.writeHead(200); res.end('ok'); return;
+  }
 
   // Modal lock: state=1 → lock schreiben, state=0 → lock löschen
   if (req.method === 'POST' && req.url.startsWith('/modal-lock')) {
@@ -29,29 +37,34 @@ const server = http.createServer((req, res) => {
 
   // Trigger summarize_mails.ps1
   if (req.method === 'POST' && req.url === '/run-summarize') {
-    const ps = spawn('powershell.exe', [
+    const ps = spawn(POWERSHELL, [
       '-NonInteractive', '-NoProfile', '-ExecutionPolicy', 'Bypass',
       '-File', path.join(APP_DIR, 'summarize_mails.ps1')
-    ]);
-    ps.on('close', code => {
-      if (code === 0) { res.writeHead(200); res.end('OK'); }
-      else            { res.writeHead(500); res.end(`Exit code ${code}`); }
-    });
-    ps.on('error', err => { res.writeHead(500); res.end(err.message); });
+    ], { detached: true, cwd: APP_DIR, stdio: 'ignore' });
+    ps.unref();
+    res.writeHead(202); res.end('Accepted');
     return;
   }
 
   // Trigger export_outlook_mails.ps1
   if (req.method === 'POST' && req.url === '/run-export-mails') {
-    const ps = spawn('powershell.exe', [
+    const ps = spawn(POWERSHELL, [
       '-NonInteractive', '-NoProfile', '-ExecutionPolicy', 'Bypass',
       '-File', path.join(APP_DIR, 'export_outlook_mails.ps1')
-    ]);
-    ps.on('close', code => {
-      if (code === 0) { res.writeHead(200); res.end('OK'); }
-      else            { res.writeHead(500); res.end(`Exit code ${code}`); }
-    });
-    ps.on('error', err => { res.writeHead(500); res.end(err.message); });
+    ], { detached: true, cwd: APP_DIR, stdio: 'ignore' });
+    ps.unref();
+    res.writeHead(202); res.end('Accepted');
+    return;
+  }
+
+  // Trigger plan_next_day.ps1
+  if (req.method === 'POST' && req.url === '/run-plan-next-day') {
+    const { execFile } = require('child_process');
+    const psFile = path.join(APP_DIR, 'plan_next_day.ps1');
+    execFile(POWERSHELL, [
+      '-NonInteractive', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', psFile
+    ], { cwd: APP_DIR, maxBuffer: 10 * 1024 * 1024 }, () => {});
+    res.writeHead(202); res.end('Accepted');
     return;
   }
 
@@ -65,7 +78,7 @@ const server = http.createServer((req, res) => {
   }
 
   const subdir   = ['links.json', 'lernplan_progress.json', 'sport.json'].includes(filename) ? 'Wissen'
-                 : ['actions.json','actions.txt','learn.txt','termine.txt','notizen.json'].includes(filename) ? 'Daten'
+                 : ['actions.json','learn.txt','termine.txt','notizen.json'].includes(filename) ? 'Daten'
                  : '';
   const filePath = subdir ? path.join(APP_DIR, subdir, filename) : path.join(APP_DIR, filename);
   let body = '';

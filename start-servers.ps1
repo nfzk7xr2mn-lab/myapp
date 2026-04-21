@@ -4,17 +4,17 @@
 $appDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $port   = 9001
 
-# Stop existing servers on port 9001 and 5500
+# Stop processes on port 9001 and 5500 only (not all node processes)
 foreach ($p in @(9001, 5500)) {
-    $proc = Get-NetTCPConnection -LocalPort $p -ErrorAction SilentlyContinue |
-            Select-Object -ExpandProperty OwningProcess -ErrorAction SilentlyContinue |
-            Select-Object -Unique
-    if ($proc) {
-        Stop-Process -Id $proc -Force -ErrorAction SilentlyContinue
-        Write-Host "Alter Prozess auf Port $p gestoppt (PID $proc)" -ForegroundColor Yellow
+    $procs = Get-NetTCPConnection -LocalPort $p -ErrorAction SilentlyContinue |
+             Select-Object -ExpandProperty OwningProcess -ErrorAction SilentlyContinue |
+             Where-Object { $_ -gt 0 } | Select-Object -Unique
+    foreach ($procId in $procs) {
+        Stop-Process -Id $procId -Force -ErrorAction SilentlyContinue
+        Write-Host "Prozess auf Port $p gestoppt (PID $procId)" -ForegroundColor Yellow
     }
 }
-Start-Sleep -Milliseconds 700
+Start-Sleep -Milliseconds 1000
 
 # Write server (Node.js, port 9001)
 Start-Process "node" -ArgumentList "`"$appDir\write-server.js`"" `

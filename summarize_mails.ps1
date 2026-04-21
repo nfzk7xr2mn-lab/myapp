@@ -1,5 +1,5 @@
 # Summarize today's mails via local Anthropic proxy
-# Runs every minute via Task Scheduler; regenerates summary for current calendar week
+# Triggered on demand via write-server POST /run-summarize
 
 . "$PSScriptRoot\secrets.ps1"
 
@@ -8,16 +8,14 @@ $outputDir  = Join-Path $scriptDir "Daten"
 if (-not (Test-Path $outputDir)) { New-Item -ItemType Directory -Path $outputDir | Out-Null }
 
 if (Test-Path "C:\Temp\myapp-modal.lock") {
-    Write-Host "Modal offen – Zusammenfassung übersprungen." -ForegroundColor Yellow
+    Write-Host "Modal offen - Zusammenfassung uebersprungen." -ForegroundColor Yellow
     exit
 }
-$mailsFile  = Join-Path $outputDir "mails_heute.json"
 
-# Calendar week number
-$kw = Get-Date -UFormat "%V"
+$mailsFile   = Join-Path $outputDir "mails_heute.json"
+$kw          = Get-Date -UFormat "%V"
 $summaryFile = Join-Path $outputDir "summary_KW$kw.json"
 
-# Read mails
 $mails = Get-Content $mailsFile -Raw -Encoding UTF8 | ConvertFrom-Json
 if (-not $mails) {
     $ts = [int64](([datetime]::UtcNow - [datetime]'1970-01-01T00:00:00Z').TotalMilliseconds)
@@ -28,26 +26,21 @@ if (-not $mails) {
 function Get-ShortName($full) {
     if (-not $full) { return '' }
     $trimmed = $full.Trim()
-    # DL/group: starts with "DL " or contains _ or digits → show as-is
     if ($trimmed -match '^DL\s' -or $trimmed -match '[_\d]') { return $trimmed }
-    # "Nachname, Vorname" format
     if ($trimmed -match '^([^,]+),\s*(.+)$') {
         $last  = $Matches[1].Trim()
         $first = $Matches[2].Trim().Split(' ')[0]
         return "$first $($last[0].ToString().ToUpper())."
     }
-    # "Vorname Nachname" format
     $parts = $trimmed -split '\s+'
     if ($parts.Count -eq 1) { return $parts[0] }
-    $first = $parts[0]
-    $lastInitial = $parts[-1][0].ToString().ToUpper()
-    return "$first $lastInitial."
+    return "$($parts[0]) $($parts[-1][0].ToString().ToUpper())."
 }
 
 $mailText = ($mails | ForEach-Object {
-    $name      = Get-ShortName $_.from
-    $richtung  = if ($_.typ -eq 'gesendet') { "GESENDET AN: $(Get-ShortName ($_.to -split ';')[0])" } else { "VON: $name" }
-    $auftrag   = if ($_.auftrag) { ' [AUFTRAG]' } else { '' }
+    $name     = Get-ShortName $_.from
+    $richtung = if ($_.typ -eq 'gesendet') { "GESENDET AN: $(Get-ShortName ($_.to -split ';')[0])" } else { "VON: $name" }
+    $auftrag  = if ($_.auftrag) { ' [AUFTRAG]' } else { '' }
     "[$($_.date) $($_.time)] $richtung | $($_.subject)$auftrag"
 }) -join "`n"
 
@@ -66,6 +59,7 @@ $bodyJson = $body | ConvertTo-Json -Depth 5 -Compress
 $response = Invoke-RestMethod `
     -Uri $ProxyUri `
     -Method POST `
+    -TimeoutSec 120 `
     -Headers @{
         "x-api-key"         = $ApiKey
         "anthropic-version" = "2023-06-01"
@@ -73,7 +67,6 @@ $response = Invoke-RestMethod `
     } `
     -Body ([System.Text.Encoding]::UTF8.GetBytes($bodyJson))
 
-# Debug: log full response if content is missing
 if (-not $response.content -or -not $response.content[0].text) {
     $debugFile = Join-Path $outputDir "summary_debug.json"
     $response | ConvertTo-Json -Depth 10 | Set-Content $debugFile -Encoding UTF8
@@ -81,8 +74,8 @@ if (-not $response.content -or -not $response.content[0].text) {
     exit
 }
 
-$summary = $response.content[0].text
-$ts = [int64](([datetime]::UtcNow - [datetime]'1970-01-01T00:00:00Z').TotalMilliseconds)
+$summary   = $response.content[0].text
+$ts        = [int64](([datetime]::UtcNow - [datetime]'1970-01-01T00:00:00Z').TotalMilliseconds)
 $utf8NoBom = New-Object System.Text.UTF8Encoding $false
 [System.IO.File]::WriteAllText($summaryFile, (@{summary=$summary; ts=$ts} | ConvertTo-Json), $utf8NoBom)
 Write-Host "Summary written to $summaryFile"

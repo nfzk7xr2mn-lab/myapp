@@ -1,3 +1,103 @@
+/* ── Simple Bar (Grundmodus) ──────────────────────────────────────────── */
+#simple-bar {
+  display: none;
+  align-items: center;
+  gap: 18px;
+  padding: 0 20px;
+  height: 56px;
+  flex-shrink: 0;
+}
+
+#sb-clock {
+  font-size: 1.9rem;
+  font-weight: 700;
+  color: var(--gold);
+  letter-spacing: -1px;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+#sb-date {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+#sb-phase {
+  font-size: 0.62rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 1.2px;
+  color: var(--gold-dark);
+  background: rgba(201,168,76,0.08);
+  border: 1px solid rgba(201,168,76,0.22);
+  padding: 2px 10px;
+  border-radius: 20px;
+  white-space: nowrap;
+}
+
+.sb-sep {
+  width: 1px;
+  height: 28px;
+  background: var(--tile-border);
+  flex-shrink: 0;
+}
+
+#sb-cal {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.78rem;
+  color: var(--text);
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+#sb-cal .sb-label { color: var(--text-muted); font-size: 0.65rem; flex-shrink: 0; }
+#sb-cal .sb-current { color: var(--gold-light); font-weight: 600; }
+#sb-cal .sb-time { color: var(--text-muted); font-size: 0.68rem; flex-shrink: 0; }
+
+#sb-mail {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.78rem;
+  color: var(--text);
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+#sb-mail .sb-label  { color: var(--text-muted); font-size: 0.65rem; flex-shrink: 0; }
+#sb-mail .sb-count  { color: var(--gold); font-weight: 600; flex-shrink: 0; }
+#sb-mail .sb-sender { color: var(--text-muted); font-size: 0.72rem; flex-shrink: 0; }
+#sb-mail .sb-subj   { color: var(--text); font-size: 0.74rem; overflow: hidden; text-overflow: ellipsis; }
+
+#btn-mode-toggle {
+  margin-left: auto;
+  background: none;
+  border: 1px solid var(--tile-border);
+  color: var(--text-muted);
+  font-size: 1rem;
+  width: 30px; height: 30px;
+  border-radius: 8px;
+  cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  flex-shrink: 0;
+  transition: all 0.2s;
+}
+#btn-mode-toggle:hover { border-color: var(--gold); color: var(--gold); }
+
+/* Mode classes */
+body.mode-simple #header       { display: none; }
+body.mode-simple #tiles        { display: none; }
+body.mode-simple #simple-bar   { display: flex; }
+body.mode-expert #simple-bar   { display: none; }
+body.mode-expert #header       { display: flex; }
+body.mode-expert #tiles        { display: grid; }
+
 /* ── Reset & Base ─────────────────────────────────────────────────────── */
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -81,6 +181,17 @@ body.phase-nacht      { background: radial-gradient(ellipse at top, #080c18 0%, 
   padding: 3px 12px;
   border-radius: 20px;
 }
+
+#server-status {
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  background: #555;
+  margin-left: 10px;
+  transition: background 0.4s;
+  cursor: default;
+}
+#server-status.ok  { background: #4caf7d; }
+#server-status.err { background: #e74c3c; }
 
 /* ── Tiles ────────────────────────────────────────────────────────────── */
 #tiles {
@@ -242,7 +353,7 @@ body.phase-nacht      { background: radial-gradient(ellipse at top, #080c18 0%, 
 }
 .cal-item:last-child { border-bottom: none; }
 .cal-item.cal-current { color: var(--gold-light); font-weight: 600; }
-.cal-item.cal-past    { opacity: 0.4; }
+.cal-item.cal-past    { opacity: 0.4; font-weight: 400; }
 .cal-item.cal-allday-item {
   opacity: 0.65;
   border-bottom-style: dashed;
@@ -284,6 +395,22 @@ body.phase-nacht      { background: radial-gradient(ellipse at top, #080c18 0%, 
 
 .cal-sync-link { text-decoration: none; margin-left: 4px; opacity: 0.7; font-size: 0.75rem; cursor: pointer; }
 .cal-sync-link:hover { opacity: 1; }
+
+.cal-tentative { opacity: 0.5; color: var(--text-muted); }
+.cal-optional  { opacity: 0.55; }
+
+.cal-badge {
+  display: inline-block;
+  font-size: 0.55rem;
+  font-weight: 700;
+  padding: 1px 4px;
+  border-radius: 4px;
+  margin-left: 4px;
+  vertical-align: middle;
+  letter-spacing: 0.3px;
+}
+.cal-badge-tent { background: rgba(201,168,76,0.18); color: var(--gold-dark); }
+.cal-badge-opt  { background: rgba(255,255,255,0.08); color: var(--text-muted); }
 
 /* ── Learn Items ──────────────────────────────────────────────────────── */
 .learn-item {
@@ -340,6 +467,30 @@ body.phase-nacht      { background: radial-gradient(ellipse at top, #080c18 0%, 
 .btn-edit-action:hover { border-color: var(--gold) !important; color: var(--gold) !important; }
 
 /* ── Action Items ─────────────────────────────────────────────────────── */
+.actions-tabs {
+  display: flex;
+  gap: 4px;
+  padding: 0 0 6px 0;
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+  flex-shrink: 0;
+}
+.actions-tab {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: 0.7rem;
+  font-weight: 500;
+  padding: 3px 10px;
+  border-radius: 10px;
+  cursor: pointer;
+  letter-spacing: 0.5px;
+}
+.actions-tab.active {
+  background: rgba(201,168,76,0.12);
+  color: var(--gold);
+}
+.actions-tab:hover:not(.active) { color: var(--text); }
+
 .action-item {
   display: flex;
   align-items: flex-start;

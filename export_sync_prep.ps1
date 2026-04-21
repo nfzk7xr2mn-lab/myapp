@@ -10,9 +10,10 @@ $outputDir = Join-Path $scriptDir "Daten"
 if (-not (Test-Path $outputDir)) { New-Item -ItemType Directory -Path $outputDir | Out-Null }
 
 # Chef + alle Mitarbeiter als Suchpool
-$SyncPersonen = @($Mitarbeiter) + @(@{ name = 'Reichart, Stephan'; email = $ChefEmail })
+$SyncPersonen = @($Mitarbeiter) + @(@{ name = $ChefName; email = $ChefEmail })
 
 $outlook  = New-Object -ComObject Outlook.Application
+try {
 $calendar = $outlook.Session.GetDefaultFolder(9)  # olFolderCalendar
 $inbox    = $outlook.Session.GetDefaultFolder(6)  # olFolderInbox
 $sentBox  = $outlook.Session.GetDefaultFolder(5)  # olFolderSentMail
@@ -44,7 +45,7 @@ foreach ($appt in $tomorrowItems) {
         Write-Host "  Termin: $($appt.Subject)" -ForegroundColor DarkGray
         foreach ($ma in $SyncPersonen) {
             $nameParts = ($ma.name -split '[,\s]+') | Where-Object { $_.Length -gt 2 }
-            $match = [bool]($nameParts | Where-Object { $summary -like "*$($_.ToLower())*" })
+            $match = [bool]($nameParts | Where-Object { $summary -match "\b$([regex]::Escape($_.ToLower()))\b" })
             if ($match -and ($gefunden | Where-Object { $_.email -eq $ma.email }).Count -eq 0) {
                 $gefunden += $ma
                 Write-Host "  Sync gefunden: $($ma.name)" -ForegroundColor Cyan
@@ -103,7 +104,7 @@ foreach ($ma in $gefunden) {
         try {
             $fromLower = ($mail.SenderEmailAddress + ' ' + $mail.SenderName).ToLower()
             $isFrom = ($fromLower -like "*$emailLower*") -or
-                      [bool]($nameParts | Where-Object { $fromLower -like "*$($_.ToLower())*" })
+                      [bool]($nameParts | Where-Object { $fromLower -match "\b$([regex]::Escape($_.ToLower()))\b" })
             if (-not $isFrom) { continue }
             $bodyTrimmed = ($mail.Body -replace '\r?\n+', ' ').Trim()
             $mails += [PSCustomObject]@{
@@ -123,11 +124,10 @@ foreach ($ma in $gefunden) {
             $toLower = $mail.To.ToLower()
             $ccLower = $mail.CC.ToLower()
             $isInTo = ($toLower -like "*$emailLower*") -or
-                      [bool]($nameParts | Where-Object { $toLower -like "*$($_.ToLower())*" })
+                      [bool]($nameParts | Where-Object { $toLower -match "\b$([regex]::Escape($_.ToLower()))\b" })
             $isInCc = ($ccLower -like "*$emailLower*") -or
-                      [bool]($nameParts | Where-Object { $ccLower -like "*$($_.ToLower())*" })
-            # Nur direkte Mails: Mitarbeiter in To, nicht nur CC
-            if (-not $isInTo -or $isInCc) { continue }
+                      [bool]($nameParts | Where-Object { $ccLower -match "\b$([regex]::Escape($_.ToLower()))\b" })
+            if (-not $isInTo) { continue }
             $bodyTrimmed = ($mail.Body -replace '\r?\n+', ' ').Trim()
             $mails += [PSCustomObject]@{
                 date    = $mail.SentOn.ToString("dd.MM.yyyy")
@@ -163,3 +163,6 @@ if ($null -eq $syncJson -or $syncJson -eq '') { $syncJson = '[]' }
 elseif ($syncJson.TrimStart()[0] -ne '[') { $syncJson = "[$syncJson]" }
 [System.IO.File]::WriteAllText((Join-Path $outputDir "sync_files.json"), $syncJson, (New-Object System.Text.UTF8Encoding $false))
 Write-Host "sync_files.json geschrieben ($($gefunden.Count) Eintraege)" -ForegroundColor Green
+} finally {
+    if ($outlook) { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($outlook) | Out-Null }
+}

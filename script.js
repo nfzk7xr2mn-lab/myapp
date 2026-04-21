@@ -1,3 +1,80 @@
+// ── Simple / Expert Mode ──────────────────────────────────────────────────
+let expertMode = localStorage.getItem('expertMode') !== '0';
+
+function applyMode(expert) {
+  expertMode = expert;
+  localStorage.setItem('expertMode', expert ? '1' : '0');
+  const phase = currentPhase();
+  document.body.className = phase.css + (expert ? ' mode-expert' : ' mode-simple');
+  const btn = document.getElementById('btn-mode-toggle');
+  if (btn) { btn.textContent = expert ? '⊟' : '⊞'; btn.title = expert ? 'Grundmodus (E)' : 'Expertenmodus (E)'; }
+  if (!expert) renderSimpleBar();
+}
+
+function renderSimpleBar() {
+  const now    = new Date();
+  const curMin = now.getHours() * 60 + now.getMinutes();
+
+  // Clock + date
+  const hh = now.getHours().toString().padStart(2,'0');
+  const mm = now.getMinutes().toString().padStart(2,'0');
+  const clockEl = document.getElementById('sb-clock');
+  const dateEl  = document.getElementById('sb-date');
+  const phaseEl = document.getElementById('sb-phase');
+  if (clockEl) clockEl.textContent = `${hh}:${mm}`;
+  if (dateEl)  dateEl.textContent  = now.toLocaleDateString('de-DE', { weekday:'long', day:'2-digit', month:'long' });
+  if (phaseEl) phaseEl.textContent = currentPhase().label;
+
+  // Calendar: current or next event
+  const calEl = document.getElementById('sb-cal');
+  if (calEl) {
+    const timed = icsEvents.filter(e => !e.allDay);
+    const current = timed.find(e => {
+      const s = e.startDate.getHours() * 60 + e.startDate.getMinutes();
+      const en = e.endDate.getHours()   * 60 + e.endDate.getMinutes();
+      return curMin >= s && curMin <= en;
+    });
+    const next = !current && timed.find(e => {
+      const s = e.startDate.getHours() * 60 + e.startDate.getMinutes();
+      return s > curMin;
+    });
+    if (current) {
+      const endStr = fmtTime(current.endDate);
+      calEl.innerHTML = `<span class="sb-label">📅</span><span class="sb-current">${escapeHtml(current.title)}</span><span class="sb-time">bis ${endStr}</span>`;
+    } else if (next) {
+      const startStr = fmtTime(next.startDate);
+      calEl.innerHTML = `<span class="sb-label">📅</span><span>${escapeHtml(next.title)}</span><span class="sb-time">${startStr}</span>`;
+    } else {
+      calEl.innerHTML = `<span class="sb-label">📅</span><span style="color:var(--text-muted)">Keine Termine</span>`;
+    }
+  }
+
+  // Mail: count today + latest
+  const mailEl = document.getElementById('sb-mail');
+  if (mailEl) {
+    const today = todayStr();
+    const todayMails = mailData.filter(m => m.date === today && m.typ !== 'gesendet');
+    const count = todayMails.length;
+    if (count === 0) {
+      mailEl.innerHTML = `<span class="sb-label">✉️</span><span style="color:var(--text-muted)">Keine Mails heute</span>`;
+    } else {
+      const last   = todayMails[todayMails.length - 1];
+      const sender = shortName(last.from);
+      mailEl.innerHTML = `<span class="sb-label">✉️</span><span class="sb-count">${count}</span><span class="sb-sender">${escapeHtml(sender)}</span><span class="sb-subj">${escapeHtml(last.subject)}</span>`;
+    }
+  }
+}
+
+document.getElementById('btn-mode-toggle').addEventListener('click', () => applyMode(!expertMode));
+
+document.addEventListener('keydown', e => {
+  if (e.key === 'e' || e.key === 'E') {
+    const tag = document.activeElement && document.activeElement.tagName;
+    if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+    applyMode(!expertMode);
+  }
+});
+
 // ── Config ────────────────────────────────────────────────────────────────
 const PHASES = [
   { id: 'morgen',      label: 'Morgen',     start: '06:00', end: '11:30', css: 'phase-morgen' },
@@ -20,7 +97,8 @@ let notizenData = [];
 let icsEvents       = [];
 let icsTomorrowEvents = [];
 let syncFiles     = [];  // from Daten/sync_files.json
-let aktiverFokusTab  = 'notizen';
+let aktiverFokusTab   = 'notizen';
+let activeActionsTab  = 'open';
 let lernplanData     = null;
 let lernplanProgress = {};
 
@@ -83,6 +161,7 @@ async function loadICSAuto() {
 
   const syncModalOpen = document.getElementById('modal-sync').style.display !== 'none';
   if (!syncModalOpen) renderKalender();
+  if (!expertMode) renderSimpleBar();
 }
 
 // ── Load data ──────────────────────────────────────────────────────────────
@@ -116,6 +195,8 @@ async function loadAll() {
 }
 
 function defaultFokusTab() {
+  const saved = localStorage.getItem('fokusTab');
+  if (saved) return saved;
   const h = new Date().getHours();
   if (h < 8)  return 'sport';
   if (h >= 17) return 'wissen';
@@ -126,8 +207,9 @@ function syncFokusTabUI() {
   document.querySelectorAll('.fokus-tab').forEach(b =>
     b.classList.toggle('active', b.dataset.tab === aktiverFokusTab)
   );
-  document.getElementById('btn-add-learn').style.display = (aktiverFokusTab === 'links')   ? '' : 'none';
-  document.getElementById('btn-add-notiz').style.display = (aktiverFokusTab === 'notizen') ? '' : 'none';
+  document.getElementById('btn-add-learn').style.display     = (aktiverFokusTab === 'links')   ? '' : 'none';
+  document.getElementById('btn-add-notiz').style.display     = (aktiverFokusTab === 'notizen') ? '' : 'none';
+  document.getElementById('btn-plan-next-day').style.display = (aktiverFokusTab === 'notizen') ? '' : 'none';
   const hasBtn = aktiverFokusTab === 'links' || aktiverFokusTab === 'notizen';
   document.querySelector('#tile-fokus .tile-footer').classList.toggle('has-button', hasBtn);
   document.getElementById('btn-fokus-placeholder').style.display = hasBtn ? 'none' : '';
@@ -221,7 +303,8 @@ function renderHeader() {
     now.toLocaleDateString('de-DE', { weekday:'long', day:'2-digit', month:'long', year:'numeric' });
   const phase = currentPhase();
   document.getElementById('phase-badge').textContent = phase.label;
-  document.body.className = phase.css;
+  document.body.className = phase.css + (expertMode ? ' mode-expert' : ' mode-simple');
+  if (!expertMode) renderSimpleBar();
 }
 
 // ── Render Kalender ────────────────────────────────────────────────────────
@@ -236,19 +319,20 @@ function renderKalender() {
   // Use ICS events if available, otherwise fall back to rawTermine
   if (icsEvents.length > 0) {
     const renderEvent = (e, extraCls = '') => {
-      // check if a sync prep file exists for this event
       const syncMatch = syncFiles.find(sf => {
         const nameParts = sf.name.split(/[, ]+/).filter(p => p.length > 2);
-        return nameParts.some(p => e.title.toLowerCase().includes(p.toLowerCase()));
+        return nameParts.some(p => new RegExp('\\b' + p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\b', 'i').test(e.title));
       });
       const syncLink = syncMatch
         ? ` <span class="cal-sync-link" onclick="openSyncModal('${syncMatch.file}','${syncMatch.name}')">📋</span>`
         : '';
+      const badges = (e.tentative ? ' <span class="cal-badge cal-badge-tent" title="Tentativ">?</span>' : '')
+                   + (e.optional  ? ' <span class="cal-badge cal-badge-opt"  title="Optional">opt</span>' : '');
       if (e.allDay) {
-        return `<div class="cal-item cal-allday-item${extraCls ? ' ' + extraCls : ''}">
+        return `<div class="cal-item cal-allday-item${extraCls ? ' ' + extraCls : ''}${e.tentative ? ' cal-tentative' : ''}${e.optional ? ' cal-optional' : ''}">
           <span class="cal-dot"></span>
           <span class="cal-time" style="font-style:italic">Ganztag</span>
-          <span>${e.title}${syncLink}</span>
+          <span>${e.title}${badges}${syncLink}</span>
         </div>`;
       }
       const startMin = e.startDate.getHours() * 60 + e.startDate.getMinutes();
@@ -257,12 +341,14 @@ function renderKalender() {
       const current  = curMin >= startMin && curMin <= endMin;
       let cls = 'cal-item';
       if (extraCls) cls += ' ' + extraCls;
-      else if (current) cls += ' cal-current';
       else if (past)    cls += ' cal-past';
+      else if (current) cls += ' cal-current';
+      else if (e.tentative) cls += ' cal-tentative';
+      else if (e.optional)  cls += ' cal-optional';
       return `<div class="${cls}">
         <span class="cal-dot"></span>
         <span class="cal-time">${fmtTime(e.startDate)}–${fmtTime(e.endDate)}</span>
-        <span>${e.title}${syncLink}</span>
+        <span>${e.title}${badges}${syncLink}</span>
       </div>`;
     };
 
@@ -312,11 +398,13 @@ function renderKalender() {
 // ── Render Fokus ───────────────────────────────────────────────────────────
 function switchFokusTab(tab) {
   aktiverFokusTab = tab;
+  localStorage.setItem('fokusTab', tab);
   document.querySelectorAll('.fokus-tab').forEach(b =>
     b.classList.toggle('active', b.dataset.tab === tab)
   );
   document.getElementById('btn-add-learn').style.display   = (tab === 'links')   ? '' : 'none';
   document.getElementById('btn-add-notiz').style.display   = (tab === 'notizen') ? '' : 'none';
+  document.getElementById('btn-plan-next-day').style.display = (tab === 'notizen') ? '' : 'none';
   const hasBtn = tab === 'links' || tab === 'notizen';
   document.querySelector('#tile-fokus .tile-footer').classList.toggle('has-button', hasBtn);
   renderFokus();
@@ -421,13 +509,14 @@ function renderLernplan() {} // unused, kept for safety
 function renderWissen(container) {
   Promise.allSettled([
     fetch('Wissen/hörbuch.json').then(r => r.json()),
-    fetch('Wissen/hinterbliebenen.json').then(r => r.json())
-  ]).then(([hoerbuchRes, hinterbliebenenRes]) => {
+    fetch('Wissen/hinterbliebenen.json').then(r => r.json()),
+    fetch('Wissen/leistungsabfall.json').then(r => r.json()),
+  ]).then(([hoerbuchRes, hinterbliebenenRes, leistungsabfallRes]) => {
     const renderBuecher = (data, icon) => data.map(b => {
       const gedanken = (b.kerngedanken || []).map(g =>
         `<div class="wissen-gedanke-item">
           <strong>${g.nr}. ${escapeHtml(g.titel)}</strong>
-          <p class="wissen-beschreibung">${escapeHtml(g.beschreibung)}</p>
+          <p class="wissen-beschreibung">${escapeHtml(g.beschreibung).replace(/\n/g, '<br>')}</p>
         </div>`
       ).join('');
       const gedankenBlock = gedanken ? `<details class="wissen-gedanke">
@@ -444,12 +533,21 @@ function renderWissen(container) {
       </details>`;
     }).join('');
 
+    const sectionHeader = label =>
+      `<div class="wissen-section-header">${label}</div>`;
+
     let html = '';
     if (hoerbuchRes.status === 'fulfilled') {
+      html += sectionHeader('📖 Hörbücher');
       html += renderBuecher(hoerbuchRes.value, '📖');
     }
-    if (hinterbliebenenRes.status === 'fulfilled') {
-      html += renderBuecher(hinterbliebenenRes.value, '📋');
+    const miscItems = [
+      hinterbliebenenRes.status === 'fulfilled' ? renderBuecher(hinterbliebenenRes.value, '📋') : '',
+      leistungsabfallRes.status === 'fulfilled' ? renderBuecher(leistungsabfallRes.value, '📉') : '',
+    ].filter(Boolean).join('');
+    if (miscItems) {
+      html += sectionHeader('🗂 Misc');
+      html += miscItems;
     }
     container.innerHTML = html || '<div style="color:var(--text-muted);font-size:0.75rem;padding:8px 0">Keine Inhalte geladen</div>';
   });
@@ -457,11 +555,13 @@ function renderWissen(container) {
 
 function formatNotizText(text) {
   const emojiRe = /^\p{Emoji}/u;
-  return text.split('\n').map(line => {
+  return text.split('\n').map((line, i, arr) => {
     const escaped = escapeHtml(line);
-    return emojiRe.test(line)
-      ? `<strong>${escaped}</strong>`
-      : `<span style="color:var(--text-muted)">${escaped}</span>`;
+    if (emojiRe.test(line)) {
+      const prefix = i > 0 ? '<br>' : '';
+      return `${prefix}<span style="color:var(--gold)">${escaped}</span>`;
+    }
+    return `<span style="color:var(--text-muted)">${escaped}</span>`;
   }).join('<br>');
 }
 
@@ -522,13 +622,17 @@ function deleteLink(idx) {
 }
 
 // ── Render Actions ─────────────────────────────────────────────────────────
+function switchActionsTab(tab) {
+  activeActionsTab = tab;
+  document.querySelectorAll('.actions-tab').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
+  renderActions();
+}
+
 function renderActions() {
   const now      = new Date();
   const todayDate = new Date(now.getFullYear(), now.getMonth(), now.getDate());
   const dayOfWeek = todayDate.getDay();
   const daysToMon = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
-  const weekStart = new Date(todayDate);
-  weekStart.setDate(weekStart.getDate() - daysToMon);
 
   function parseDateStr(s) {
     if (!s) return null;
@@ -540,7 +644,6 @@ function renderActions() {
 
   const actionsBody  = document.getElementById('actions-body');
   const actionsCount = document.getElementById('actions-count');
-
   const open = actionsData.filter(a => !a.done);
   actionsCount.textContent = `${open.length} offen`;
 
@@ -552,20 +655,34 @@ function renderActions() {
     return '';
   }
 
-  actionsBody.innerHTML = actionsData.map((a, idx) => {
-    if (a.done) {
-      const createdDate = parseDateStr(a.created);
-      if (createdDate && createdDate < weekStart) return '';
-    }
-    const dc = dueClass(a.due);
-    return `<div class="action-item ${a.done ? 'done' : ''}" id="ai-${idx}">
-      <span class="action-due ${dc}">${a.due || ''}</span>
-      <span class="action-text">${linkify(a.text)}</span>
-      <span class="action-created">${a.created || ''}</span>
-      ${!a.done ? `<button class="btn-x btn-edit-action" title="Bearbeiten" onclick="editAction(${idx})">✎</button>` : ''}
-      ${!a.done ? `<button class="btn-x" title="Erledigt" onclick="markActionDone(${idx})">✕</button>` : ''}
-    </div>`;
-  }).join('');
+  if (activeActionsTab === 'open') {
+    const sorted = actionsData
+      .map((a, idx) => ({ a, idx }))
+      .filter(({ a }) => !a.done)
+      .sort((x, y) => {
+        const dx = parseDateStr(x.a.due), dy = parseDateStr(y.a.due);
+        if (!dx && !dy) return 0; if (!dx) return 1; if (!dy) return -1;
+        return dx - dy;
+      });
+    actionsBody.innerHTML = sorted.length
+      ? sorted.map(({ a, idx }) => `<div class="action-item" id="ai-${idx}">
+          <span class="action-due ${dueClass(a.due)}">${a.due || ''}</span>
+          <span class="action-text">${linkify(a.text)}</span>
+          <span class="action-created">${a.created || ''}</span>
+          <button class="btn-x btn-edit-action" title="Bearbeiten" onclick="editAction(${idx})">✎</button>
+          <button class="btn-x" title="Erledigt" onclick="markActionDone(${idx})">✕</button>
+        </div>`).join('')
+      : '<div style="color:var(--text-muted);font-size:0.75rem;padding:8px 0">Keine offenen Actions.</div>';
+  } else {
+    const done = actionsData.map((a, idx) => ({ a, idx })).filter(({ a }) => a.done);
+    actionsBody.innerHTML = done.length
+      ? done.map(({ a }) => `<div class="action-item done">
+          <span class="action-due">${a.due || ''}</span>
+          <span class="action-text">${linkify(a.text)}</span>
+          <span class="action-created">${a.created || ''}</span>
+        </div>`).join('')
+      : '<div style="color:var(--text-muted);font-size:0.75rem;padding:8px 0">Keine erledigten Actions.</div>';
+  }
 }
 
 function markActionDone(idx) {
@@ -655,8 +772,44 @@ document.getElementById('btn-save-notiz').addEventListener('click', () => {
   document.getElementById('new-notiz-text').value  = '';
 });
 
+let planPolling = false;
+document.getElementById('btn-plan-next-day').addEventListener('click', async () => {
+  if (planPolling) return;
+  planPolling = true;
+  const btn = document.getElementById('btn-plan-next-day');
+  btn.textContent = '⟳ …';
+  const triggeredAt = Date.now();
+  try {
+    await fetch(`${WRITE_SERVER}/run-plan-next-day`, { method: 'POST' });
+  } catch(e) {}
+  const deadline = triggeredAt + 5 * 60000;
+  const poll = async () => {
+    try {
+      const r = await fetch('Daten/notizen.json?v=' + Date.now());
+      if (r.ok) {
+        const data = await r.json();
+        const found = data.find(n => n.titel && n.titel.startsWith('Planung KW') && n.ts >= triggeredAt);
+        if (found) {
+          notizenData = data;
+          renderFokus();
+          btn.textContent = '⟳ Planung';
+          planPolling = false;
+          return;
+        }
+      }
+    } catch(e) {}
+    if (Date.now() < deadline) {
+      setTimeout(poll, 8000);
+    } else {
+      btn.textContent = '⟳ Planung';
+      planPolling = false;
+    }
+  };
+  setTimeout(poll, 8000);
+});
+
 function openSyncModal(file, name) {
-  document.getElementById('modal-sync-title').textContent = 'Sync-Vorbereitung: ' + name;
+  document.getElementById('modal-sync-title').textContent = 'Sync-Vorbereitung: ' + shortName(name);
   const body = document.getElementById('modal-sync-body');
   body.innerHTML = '<div style="color:var(--text-muted);font-size:0.75rem;padding:8px 0">Lade…</div>';
   document.getElementById('modal-sync').style.display = '';
@@ -769,6 +922,8 @@ function parseICS(text, forDate) {
     if (baseKey === 'DTSTART') ev.start = val;
     if (baseKey === 'DTEND')   ev.end   = val;
     if (baseKey === 'TRANSP')  ev.transp = val.trim().toUpperCase();
+    if (baseKey === 'X-MICROSOFT-CDO-BUSYSTATUS') ev.busyStatus = val.trim().toUpperCase();
+    if (baseKey === 'X-MYAPP-ROLE') ev.role = val.trim().toUpperCase();
   }
 
   const todayEvents = [];
@@ -787,7 +942,9 @@ function parseICS(text, forDate) {
       + startDate.getDate().toString().padStart(2,'0');
     if (evYMD !== targetYMD) continue;
 
-    todayEvents.push({ startDate, endDate, allDay, title: e.title });
+    todayEvents.push({ startDate, endDate, allDay, title: e.title,
+      tentative: e.busyStatus === 'TENTATIVE',
+      optional:  e.role === 'OPT-PARTICIPANT' });
   }
 
   // Sort by start time
@@ -851,6 +1008,7 @@ async function loadMails(skipRender = false) {
     if (!skipRender) renderMails();
   } catch(e) { console.error('loadMails error:', e); }
   checkSummaryExists();
+  if (!expertMode) renderSimpleBar();
 }
 
 function escapeHtml(s) {
@@ -1068,9 +1226,23 @@ async function summarizeMails() {
   body.innerHTML = '<div style="color:var(--text-muted);font-size:0.75rem;padding:8px 0">Mails werden abgerufen…</div>';
 
   // 1. Export fresh mails from Outlook
+  const exportedAt = Date.now();
   try {
     await fetch(`${WRITE_SERVER}/run-export-mails`, { method: 'POST' });
   } catch(e) { /* server not available */ }
+
+  // Poll sync status until mail_sync_status.json reflects the new export
+  const pollSync = async () => {
+    try {
+      const r = await fetch('Daten/mail_sync_status.json?v=' + Date.now());
+      if (r.ok) {
+        const d = await r.json();
+        if (d.ts >= exportedAt) { updateSyncStatus(); return; }
+      }
+    } catch(e) {}
+    if (Date.now() - exportedAt < 5 * 60000) setTimeout(pollSync, 5000);
+  };
+  setTimeout(pollSync, 5000);
 
   // 2. Reload mails_heute.json into mailData (no re-render)
   await loadMails(true);
@@ -1079,7 +1251,7 @@ async function summarizeMails() {
     return;
   }
 
-  body.innerHTML = '<div style="color:var(--text-muted);font-size:0.75rem;padding:8px 0">Zusammenfassung wird erstellt… (bis zu 1 Min.)</div>';
+  body.innerHTML = '<div style="color:var(--text-muted);font-size:0.75rem;padding:8px 0">Zusammenfassung wird erstellt… (bis zu 5 Min.)</div>';
 
   // 3. Trigger summarize_mails.ps1
   const requestedAt = Date.now();
@@ -1087,7 +1259,7 @@ async function summarizeMails() {
     await fetch(`${WRITE_SERVER}/run-summarize`, { method: 'POST' });
   } catch(e) { /* server not available */ }
 
-  const deadline = requestedAt + 90000;
+  const deadline = requestedAt + 10 * 60000;
   const kw = currentKW();
   const summaryFile = `Daten/summary_KW${kw}.json`;
 
@@ -1104,23 +1276,75 @@ async function summarizeMails() {
       }
     } catch(e) { /* not yet available */ }
     if (Date.now() < deadline) {
-      setTimeout(poll, 3000);
+      setTimeout(poll, 5 * 60000);
     } else {
       body.innerHTML = '<div style="color:#e74c3c;font-size:0.75rem;padding:8px 0">Zeitüberschreitung – bitte write-server prüfen.</div>';
     }
   };
 
-  setTimeout(poll, 4000);
+  setTimeout(poll, 5 * 60000);
 }
 
 document.getElementById('btn-summarize-mails').addEventListener('click', summarizeMails);
+
+// ── Server health check ────────────────────────────────────────────────────
+async function checkServerStatus() {
+  const dot = document.getElementById('server-status');
+  try {
+    const r = await fetch('http://127.0.0.1:9001/ping', { cache: 'no-store' });
+    dot.className = r.ok ? 'ok' : 'err';
+    dot.title = r.ok ? 'write-server OK' : 'write-server Fehler';
+  } catch(e) {
+    dot.className = 'err';
+    dot.title = 'write-server nicht erreichbar';
+  }
+}
+checkServerStatus();
+setInterval(checkServerStatus, 30000);
+
+// ── Mail sync status ───────────────────────────────────────────────────────
+async function updateSyncStatus() {
+  const el = document.getElementById('mail-sync-status');
+  if (!el) return;
+  try {
+    const r = await fetch('Daten/mail_sync_status.json?v=' + Date.now());
+    if (!r.ok) { el.textContent = ''; return; }
+    const d = await r.json();
+    const last    = new Date(d.ts);
+    const lastStr = last.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Berlin' });
+    const now   = new Date();
+    const t0730 = new Date(now); t0730.setHours(7, 30, 0, 0);
+    const t1230 = new Date(now); t1230.setHours(12, 30, 0, 0);
+    let next;
+    if (now < t0730)      next = t0730;
+    else if (now < t1230) next = t1230;
+    else { next = new Date(t0730); next.setDate(next.getDate() + 1); }
+    const nextStr = next.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' });
+    el.textContent = `⟳ ${lastStr} | ↻ ${nextStr}`;
+  } catch(e) { el.textContent = ''; }
+}
 
 // ── Init ───────────────────────────────────────────────────────────────────
 fetch('Daten/config.json').then(r => r.json()).then(cfg => {
   if (cfg.myAddresses) MY_ADDRESSES = cfg.myAddresses;
 }).catch(() => {}).finally(() => {
+  applyMode(expertMode);
   loadAll();
   loadMails();
+  const startedAt = Date.now();
+  fetch(`${WRITE_SERVER}/run-export-mails`, { method: 'POST' }).catch(() => {});
+  updateSyncStatus();
+  const pollSyncInit = async () => {
+    try {
+      const r = await fetch('Daten/mail_sync_status.json?v=' + Date.now());
+      if (r.ok) {
+        const d = await r.json();
+        if (d.ts >= startedAt) { updateSyncStatus(); return; }
+      }
+    } catch(e) {}
+    if (Date.now() - startedAt < 5 * 60000) setTimeout(pollSyncInit, 5000);
+  };
+  setTimeout(pollSyncInit, 5000);
 });
 setInterval(renderHeader, 60000);
 setInterval(loadICSAuto, 15 * 60000);

@@ -1,5 +1,4 @@
-# Export today's Outlook emails as JSON file
-# Runs automatically via Task Scheduler alongside export_outlook_today.ps1
+# Export current week's Outlook emails as JSON file
 
 . "$PSScriptRoot\secrets.ps1"
 
@@ -8,7 +7,7 @@ $outputDir = Join-Path $scriptDir "Daten"
 if (-not (Test-Path $outputDir)) { New-Item -ItemType Directory -Path $outputDir | Out-Null }
 
 if (Test-Path "C:\Temp\myapp-modal.lock") {
-    Write-Host "Modal offen – Export übersprungen." -ForegroundColor Yellow
+    Write-Host "Modal offen - Export uebersprungen." -ForegroundColor Yellow
     exit
 }
 
@@ -19,17 +18,13 @@ $configObj  = @{ myAddresses = $MyAddresses } | ConvertTo-Json -Compress
 
 $today     = (Get-Date).Date
 $tomorrow  = $today.AddDays(1)
-# Start of current work week (Monday) — Sunday counts as last day of current week
-$dayOfWeek = [int](Get-Date).DayOfWeek   # 0=Sun, 1=Mon … 6=Sat
+$dayOfWeek = [int](Get-Date).DayOfWeek   # 0=Sun, 1=Mon .. 6=Sat
 $daysToMon = if ($dayOfWeek -eq 0) { 6 } else { $dayOfWeek - 1 }
 $weekStart = $today.AddDays(-$daysToMon)
-$filter    = "[ReceivedTime] >= '{0}' AND [ReceivedTime] < '{1}'" -f `
-    $weekStart.ToString("MM/dd/yyyy HH:mm"), `
-    $tomorrow.ToString("MM/dd/yyyy HH:mm")
+$filter    = "[ReceivedTime] >= '" + $weekStart.ToString("MM/dd/yyyy HH:mm") + "' AND [ReceivedTime] < '" + $tomorrow.ToString("MM/dd/yyyy HH:mm") + "'"
 
-# Keywords that indicate a task/assignment
-$auftragKeywords = @('bitte', 'please', 'action required', 'action item', 'könntest du', 'kannst du',
-                     'würdest du', 'ich bitte', 'erledige', 'prüfe', 'überprüfe', 'schaue',
+$auftragKeywords = @('bitte', 'please', 'action required', 'action item', 'koenntest du', 'kannst du',
+                     'wuerdest du', 'ich bitte', 'erledige', 'pruefe', 'ueberpruefe', 'schaue',
                      'deadline', 'frist', 'bis wann', 'bis montag', 'bis freitag', 'bis ende',
                      'auftrag', 'aufgabe', 'task', 'todo', 'to-do', 'follow-up', 'followup')
 
@@ -41,14 +36,12 @@ function Test-IstAuftrag($subject, $body) {
     return $false
 }
 
-# ── Connect to Outlook ────────────────────────────────────────────────────
 $outlook  = New-Object -ComObject Outlook.Application
+try {
 $inbox    = $outlook.Session.GetDefaultFolder(6)  # 6 = olFolderInbox
 $sentBox  = $outlook.Session.GetDefaultFolder(5)  # 5 = olFolderSentMail
 
-$sentFilter = "[SentOn] >= '{0}' AND [SentOn] < '{1}'" -f `
-    $weekStart.ToString("MM/dd/yyyy HH:mm"), `
-    $tomorrow.ToString("MM/dd/yyyy HH:mm")
+$sentFilter = "[SentOn] >= '" + $weekStart.ToString("MM/dd/yyyy HH:mm") + "' AND [SentOn] < '" + $tomorrow.ToString("MM/dd/yyyy HH:mm") + "'"
 
 $sentItems = @()
 try {
@@ -58,7 +51,6 @@ try {
     }
 } catch { Write-Warning "Gesendete Elemente nicht lesbar: $_" }
 
-# Collect items from inbox — Restrict() everywhere, skip folders where it fails
 function Get-FolderItems($folder) {
     $results = @()
     try {
@@ -75,14 +67,14 @@ function Get-FolderItems($folder) {
 
 $receivedItems = Get-FolderItems $inbox
 
-$excludeSenders = @('itsm', 'sharepoint', 'do.not.reply+hrwf@sap.com')
+$excludeSenders = if ($ExcludeSenders) { $ExcludeSenders } else { @('itsm', 'sharepoint') }
 
 $mails = @()
 
-# ── Empfangene Mails ──────────────────────────────────────────────────────
+# Empfangene Mails
 foreach ($mail in $receivedItems) {
     try {
-        if ($mail.Class -ne 43) { continue }  # 43 = olMail
+        if ($mail.Class -ne 43) { continue }
         $fromLower = ($mail.SenderName + ' ' + $mail.SenderEmailAddress).ToLower()
         if ($excludeSenders | Where-Object { $fromLower -like "*$_*" }) { continue }
         $toField  = $mail.To  -replace '\s+', ''
@@ -119,7 +111,7 @@ foreach ($mail in $receivedItems) {
     }
 }
 
-# ── Gesendete Mails ───────────────────────────────────────────────────────
+# Gesendete Mails
 foreach ($mail in $sentItems) {
     try {
         if ($mail.Class -ne 43) { continue }
@@ -142,7 +134,6 @@ foreach ($mail in $sentItems) {
     }
 }
 
-# Sort by time descending (newest first)
 $mails = $mails | Sort-Object time -Descending
 
 $filePath = Join-Path $outputDir "mails_heute.json"
@@ -150,7 +141,6 @@ $json = $mails | ConvertTo-Json -Depth 3
 if ($null -eq $json -or $json -eq '') { $json = '[]' }
 elseif ($json.TrimStart()[0] -ne '[') { $json = "[$json]" }
 
-# Only overwrite if we found mails, or file doesn't exist yet
 $existingContent = if (Test-Path $filePath) { Get-Content $filePath -Raw } else { '' }
 $existingCount   = if ($existingContent -match '^\s*\[') { ($existingContent | ConvertFrom-Json).Count } else { 0 }
 
@@ -164,6 +154,11 @@ if ($mails.Count -gt 0 -or $existingCount -eq 0) {
 $count = $mails.Count
 Write-Host "Exported $count mails to: $filePath" -ForegroundColor Green
 
-# Log for debugging
 $logFile = Join-Path $outputDir "export_mail.log"
+$ts      = [int64]([System.DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds())
 "$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') - $count Mails exportiert" | Add-Content $logFile -Encoding UTF8
+@{ ts = $ts; count = $count } | ConvertTo-Json -Compress |
+    Set-Content (Join-Path $outputDir "mail_sync_status.json") -Encoding UTF8
+} finally {
+    if ($outlook) { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($outlook) | Out-Null }
+}

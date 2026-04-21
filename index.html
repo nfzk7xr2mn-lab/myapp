@@ -17,7 +17,20 @@
         <div id="date-label"></div>
       </div>
       <div id="phase-badge"></div>
+      <div id="server-status" title="write-server"></div>
     </header>
+
+    <!-- SIMPLE BAR (Grundmodus) -->
+    <div id="simple-bar">
+      <div id="sb-clock"></div>
+      <div id="sb-date"></div>
+      <div id="sb-phase"></div>
+      <div class="sb-sep"></div>
+      <div id="sb-cal"></div>
+      <div class="sb-sep"></div>
+      <div id="sb-mail"></div>
+      <button id="btn-mode-toggle" title="Expertenmodus (E)">⊞</button>
+    </div>
 
     <!-- MAIN TILES -->
     <main id="tiles">
@@ -51,6 +64,7 @@
         <div class="tile-body" id="fokus-body"></div>
         <div class="tile-footer">
           <button class="btn-ghost" id="btn-add-notiz" style="display:none">+ Notiz</button>
+          <button class="btn-ghost" id="btn-plan-next-day" style="display:none">⟳ Planung</button>
           <button class="btn-ghost" id="btn-add-learn" style="display:none">+ Link</button>
           <button class="btn-ghost" id="btn-fokus-placeholder" style="border-color:transparent;color:transparent">&nbsp;</button>
         </div>
@@ -62,6 +76,10 @@
           <span class="tile-icon">⚡</span>
           <span class="tile-title">Actions</span>
           <span class="tile-sub" id="actions-count"></span>
+        </div>
+        <div class="actions-tabs">
+          <button class="actions-tab active" data-tab="open" onclick="switchActionsTab('open')">Offen</button>
+          <button class="actions-tab" data-tab="done" onclick="switchActionsTab('done')">Erledigt</button>
         </div>
         <div class="tile-body" id="actions-body"></div>
         <div class="tile-footer">
@@ -75,6 +93,7 @@
           <span class="tile-icon">✉️</span>
           <span class="tile-title">Mails</span>
           <span class="tile-sub" id="mails-count"></span>
+          <span class="tile-sub" id="mail-sync-status" style="margin-left:auto;font-size:0.62rem;color:var(--text-muted)"></span>
         </div>
         <div class="mail-tabs" id="mail-tabs"></div>
         <div class="tile-body" id="mails-body">
@@ -140,6 +159,7 @@
     </div>
   </div>
 
+  <script src="debug-check.js"></script>
   <script src="script.js"></script>
 </body>
 </html>
