@@ -1,7 +1,7 @@
 # Export today's and tomorrow's Outlook calendar events as ICS files
 
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-$outputDir = Join-Path $scriptDir "Daten"
+$outputDir = Join-Path $scriptDir "data"
 if (-not (Test-Path $outputDir)) { New-Item -ItemType Directory -Path $outputDir | Out-Null }
 
 if (Test-Path "C:\Temp\myapp-modal.lock") {
@@ -64,6 +64,20 @@ function Export-DayICS($day) {
                         "OPT-PARTICIPANT"
                     } else { "REQ-PARTICIPANT" }
                     [void]$sb.AppendLine("X-MYAPP-ROLE:$role")
+                    $reqAtt = $item.RequiredAttendees
+                    $optAtt = $item.OptionalAttendees
+                    if ($reqAtt) {
+                        foreach ($a in ($reqAtt -split ';')) {
+                            $aName = $a.Trim()
+                            if ($aName) { [void]$sb.AppendLine("ATTENDEE;ROLE=REQ-PARTICIPANT;CN=$(Escape-ICS $aName):MAILTO:unknown") }
+                        }
+                    }
+                    if ($optAtt) {
+                        foreach ($a in ($optAtt -split ';')) {
+                            $aName = $a.Trim()
+                            if ($aName) { [void]$sb.AppendLine("ATTENDEE;ROLE=OPT-PARTICIPANT;CN=$(Escape-ICS $aName):MAILTO:unknown") }
+                        }
+                    }
                 }
             } catch {}
             [void]$sb.AppendLine("END:VEVENT")
@@ -75,7 +89,7 @@ function Export-DayICS($day) {
     [void]$sb.AppendLine("END:VCALENDAR")
 
     $dateStr  = $day.ToString("yyyyMMdd")
-    $filePath = Join-Path $outputDir "termine_$dateStr.ics"
+    $filePath = Join-Path $outputDir "calendar_$dateStr.ics"
     [System.IO.File]::WriteAllText($filePath, $sb.ToString(), [System.Text.Encoding]::UTF8)
 
     $count = ($dayItems | Measure-Object).Count

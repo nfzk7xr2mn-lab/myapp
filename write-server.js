@@ -10,7 +10,7 @@ const POWERSHELL = process.env.SystemRoot
 const PORT    = 9001;
 const APP_DIR = __dirname;
 
-const ALLOWED = new Set(['actions.json', 'learn.txt', 'termine.txt', 'links.json', 'lernplan_progress.json', 'sport.json', 'notizen.json']);
+const ALLOWED = new Set(['actions.json', 'learn.txt', 'termine.txt', 'links.json', 'learningplan_progress.json', 'sport.json', 'notes.json', 'contacts.json']);
 
 const server = http.createServer((req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -46,6 +46,17 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  // Trigger export_outlook_today.ps1
+  if (req.method === 'POST' && req.url === '/run-export-calendar') {
+    const ps = spawn(POWERSHELL, [
+      '-NonInteractive', '-NoProfile', '-ExecutionPolicy', 'Bypass',
+      '-File', path.join(APP_DIR, 'export_outlook_today.ps1')
+    ], { detached: true, cwd: APP_DIR, stdio: 'ignore' });
+    ps.unref();
+    res.writeHead(202); res.end('Accepted');
+    return;
+  }
+
   // Trigger export_outlook_mails.ps1
   if (req.method === 'POST' && req.url === '/run-export-mails') {
     const ps = spawn(POWERSHELL, [
@@ -57,13 +68,13 @@ const server = http.createServer((req, res) => {
     return;
   }
 
-  // Trigger plan_next_day.ps1
-  if (req.method === 'POST' && req.url === '/run-plan-next-day') {
+  // Trigger plan_week.ps1
+  if (req.method === 'POST' && req.url === '/run-plan-week') {
     const { execFile } = require('child_process');
-    const psFile = path.join(APP_DIR, 'plan_next_day.ps1');
+    const psFile = path.join(APP_DIR, 'plan_week.ps1');
     execFile(POWERSHELL, [
       '-NonInteractive', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', psFile
-    ], { cwd: APP_DIR, maxBuffer: 10 * 1024 * 1024 }, () => {});
+    ], { cwd: APP_DIR, maxBuffer: 10 * 1024 * 1024, timeout: 480000 }, () => {});
     res.writeHead(202); res.end('Accepted');
     return;
   }
@@ -77,8 +88,8 @@ const server = http.createServer((req, res) => {
     res.writeHead(403); res.end('Forbidden'); return;
   }
 
-  const subdir   = ['links.json', 'lernplan_progress.json', 'sport.json'].includes(filename) ? 'Wissen'
-                 : ['actions.json','learn.txt','termine.txt','notizen.json'].includes(filename) ? 'Daten'
+  const subdir   = ['links.json', 'learningplan_progress.json', 'sport.json'].includes(filename) ? 'knowledge'
+                 : ['actions.json','learn.txt','termine.txt','notes.json','contacts.json'].includes(filename) ? 'data'
                  : '';
   const filePath = subdir ? path.join(APP_DIR, subdir, filename) : path.join(APP_DIR, filename);
   let body = '';

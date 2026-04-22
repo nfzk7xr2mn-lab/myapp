@@ -1,5 +1,5 @@
 // ── Simple / Expert Mode ──────────────────────────────────────────────────
-let expertMode = localStorage.getItem('expertMode') !== '0';
+let expertMode = localStorage.getItem('expertMode') === '1';
 
 function applyMode(expert) {
   expertMode = expert;
@@ -9,6 +9,18 @@ function applyMode(expert) {
   const btn = document.getElementById('btn-mode-toggle');
   if (btn) { btn.textContent = expert ? '⊟' : '⊞'; btn.title = expert ? 'Grundmodus (E)' : 'Expertenmodus (E)'; }
   if (!expert) renderSimpleBar();
+  try {
+    const sw = screen.availWidth;
+    const sh = screen.availHeight;
+    const barH = 64;
+    if (expert) {
+      window.moveTo(0, 0);
+      window.resizeTo(sw, sh);
+    } else {
+      window.resizeTo(sw, barH);
+      window.moveTo(0, screen.height - barH);
+    }
+  } catch(e) {}
 }
 
 function renderSimpleBar() {
@@ -25,7 +37,7 @@ function renderSimpleBar() {
   if (dateEl)  dateEl.textContent  = now.toLocaleDateString('de-DE', { weekday:'long', day:'2-digit', month:'long' });
   if (phaseEl) phaseEl.textContent = currentPhase().label;
 
-  // Calendar: current or next event
+  // Calendar: current or next event + free status
   const calEl = document.getElementById('sb-cal');
   if (calEl) {
     const timed = icsEvents.filter(e => !e.allDay);
@@ -34,18 +46,47 @@ function renderSimpleBar() {
       const en = e.endDate.getHours()   * 60 + e.endDate.getMinutes();
       return curMin >= s && curMin <= en;
     });
-    const next = !current && timed.find(e => {
+    const next = timed.find(e => {
       const s = e.startDate.getHours() * 60 + e.startDate.getMinutes();
       return s > curMin;
     });
-    if (current) {
+
+    // Free status
+    let freeHtml = '';
+    const busy = timed.find(e => {
+      const s = e.startDate.getHours() * 60 + e.startDate.getMinutes();
+      const en = e.endDate.getHours() * 60 + e.endDate.getMinutes();
+      return curMin >= s && curMin < en;
+    });
+    if (!busy) {
+      freeHtml = `<span class="sb-free-tag">🟢 jetzt frei</span>`;
+    } else {
+      let freeAt = busy.endDate;
+      const future = timed.filter(e => {
+        const s = e.startDate.getHours() * 60 + e.startDate.getMinutes();
+        return s >= freeAt.getHours() * 60 + freeAt.getMinutes();
+      }).sort((a, b) => a.startDate - b.startDate);
+      for (const fe of future) {
+        const gap = fe.startDate.getHours() * 60 + fe.startDate.getMinutes()
+                  - (freeAt.getHours() * 60 + freeAt.getMinutes());
+        if (gap > 5) break;
+        freeAt = fe.endDate;
+      }
+      freeHtml = `<span class="sb-free-tag">🟢 frei ab ${fmtTime(freeAt)}</span>`;
+    }
+
+    if (current && next) {
       const endStr = fmtTime(current.endDate);
-      calEl.innerHTML = `<span class="sb-label">📅</span><span class="sb-current">${escapeHtml(current.title)}</span><span class="sb-time">bis ${endStr}</span>`;
+      const startStr = fmtTime(next.startDate);
+      calEl.innerHTML = `<span class="sb-line1"><span class="sb-label">📅</span> bis ${endStr} <span class="sb-current">${escapeHtml(current.title)}</span></span><span class="sb-line2">ab ${startStr} <span class="sb-next">${escapeHtml(next.title)}</span>, ${freeHtml}</span>`;
+    } else if (current) {
+      const endStr = fmtTime(current.endDate);
+      calEl.innerHTML = `<span class="sb-line1"><span class="sb-label">📅</span> bis ${endStr} <span class="sb-current">${escapeHtml(current.title)}</span></span><span class="sb-line2">${freeHtml}</span>`;
     } else if (next) {
       const startStr = fmtTime(next.startDate);
-      calEl.innerHTML = `<span class="sb-label">📅</span><span>${escapeHtml(next.title)}</span><span class="sb-time">${startStr}</span>`;
+      calEl.innerHTML = `<span class="sb-line1"><span class="sb-label">📅</span> ab ${startStr} <span class="sb-next">${escapeHtml(next.title)}</span></span><span class="sb-line2">${freeHtml}</span>`;
     } else {
-      calEl.innerHTML = `<span class="sb-label">📅</span><span style="color:var(--text-muted)">Keine Termine</span>`;
+      calEl.innerHTML = `<span class="sb-label">📅</span>${freeHtml}`;
     }
   }
 
@@ -56,16 +97,64 @@ function renderSimpleBar() {
     const todayMails = mailData.filter(m => m.date === today && m.typ !== 'gesendet');
     const count = todayMails.length;
     if (count === 0) {
+      mailEl.title = 'Keine Mails heute';
       mailEl.innerHTML = `<span class="sb-label">✉️</span><span style="color:var(--text-muted)">Keine Mails heute</span>`;
     } else {
-      const last   = todayMails[todayMails.length - 1];
+      const last = todayMails[0];
       const sender = shortName(last.from);
-      mailEl.innerHTML = `<span class="sb-label">✉️</span><span class="sb-count">${count}</span><span class="sb-sender">${escapeHtml(sender)}</span><span class="sb-subj">${escapeHtml(last.subject)}</span>`;
+      mailEl.title = `${count} Mails heute – ${sender}: ${last.subject}`;
+      mailEl.innerHTML = `<span class="sb-label">✉️</span><span class="sb-count">${count}</span>`;
     }
+  }
+
+  // Badges: unanswered direct mails + open actions
+  const badgesEl = document.getElementById('sb-badges');
+  if (badgesEl) {
+    const received = mailData.filter(m => m.typ !== 'gesendet');
+    const sent = mailData.filter(m => m.typ === 'gesendet');
+    const directMails = received.filter(m => {
+      const p = mailPrio(m);
+      return p === 'direct' || p === 'chef';
+    });
+    const unanswered = directMails.filter(m => {
+      const fromLower = (m.from || '').toLowerCase();
+      return !sent.some(s => (s.to || '').toLowerCase().includes(fromLower) && s.date >= m.date);
+    });
+    const openActions = actionsData.filter(a => !a.done).length;
+    let html = '';
+    if (unanswered.length > 0) html += `<span class="sb-badge sb-badge-mail" title="Direkte Mails ohne Antwort">✉ ${unanswered.length}</span>`;
+    if (openActions > 0) html += `<span class="sb-badge sb-badge-action" title="Offene Actions">⚡ ${openActions}</span>`;
+    badgesEl.innerHTML = html;
   }
 }
 
 document.getElementById('btn-mode-toggle').addEventListener('click', () => applyMode(!expertMode));
+
+document.getElementById('btn-refresh-cal').addEventListener('click', () => {
+  const btn = document.getElementById('btn-refresh-cal');
+  btn.classList.add('spinning');
+  fetch(`${WRITE_SERVER}/run-export-calendar`, { method: 'POST' })
+    .catch(() => {})
+    .then(() => new Promise(r => setTimeout(r, 3000)))
+    .then(() => loadICSAuto())
+    .finally(() => btn.classList.remove('spinning'));
+});
+
+function refreshCalendar(btn) {
+  if (btn.disabled) return;
+  btn.disabled = true;
+  const orig = btn.textContent;
+  btn.textContent = '⟳ Wird geladen…';
+  fetch(`${WRITE_SERVER}/run-export-calendar`, { method: 'POST' })
+    .catch(() => {})
+    .then(() => new Promise(r => setTimeout(r, 3000)))
+    .then(() => loadICSAuto())
+    .finally(() => { btn.disabled = false; btn.textContent = orig; });
+}
+
+document.getElementById('btn-refresh-cal-expert').addEventListener('click', function() {
+  refreshCalendar(this);
+});
 
 document.addEventListener('keydown', e => {
   if (e.key === 'e' || e.key === 'E') {
@@ -91,16 +180,17 @@ const FUEHRUNG_TOPICS = new Set(['leadership','role clarity','mindset','managing
 // ── State ──────────────────────────────────────────────────────────────────
 let rawTermine  = '';
 let rawLearn    = '';
-let linksData   = [];
-let sportData   = [];
-let notizenData = [];
+let linksData    = [];
+let sportData    = [];
+let notizenData  = [];
+let contactsData = [];
 let icsEvents       = [];
 let icsTomorrowEvents = [];
-let syncFiles     = [];  // from Daten/sync_files.json
+let syncFiles     = [];  // from data/sync_files.json
 let aktiverFokusTab   = 'notizen';
 let activeActionsTab  = 'open';
-let lernplanData     = null;
-let lernplanProgress = {};
+let learningplanData     = null;
+let learningplanProgress = {};
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 function todayStr() {
@@ -139,8 +229,8 @@ async function loadICSAuto() {
   const tomorrow = new Date(now); tomorrow.setDate(tomorrow.getDate() + 1);
 
   const [todayRes, tomRes] = await Promise.allSettled([
-    fetch(v(`Daten/termine_${ymdOf(now)}.ics`)),
-    fetch(v(`Daten/termine_${ymdOf(tomorrow)}.ics`)),
+    fetch(v(`data/calendar_${ymdOf(now)}.ics`)),
+    fetch(v(`data/calendar_${ymdOf(tomorrow)}.ics`)),
   ]);
 
   try {
@@ -167,26 +257,28 @@ async function loadICSAuto() {
 // ── Load data ──────────────────────────────────────────────────────────────
 async function loadAll() {
   try {
-    const [tRes, aRes, lRes, lnRes, lpRes, lpProg, spRes, nRes, sfRes] = await Promise.all([
-      fetch(v('Daten/termine.txt')),
-      fetch(v('Daten/actions.json')),
-      fetch(v('Daten/learn.txt')),
-      fetch(v('Wissen/links.json')),
-      fetch(v('Wissen/lernplan.json')),
-      fetch(v('Wissen/lernplan_progress.json')),
-      fetch(v('Wissen/sport.json')),
-      fetch(v('Daten/notizen.json')),
-      fetch(v('Daten/sync_files.json')),
+    const [tRes, aRes, lRes, lnRes, lpRes, lpProg, spRes, nRes, sfRes, ctRes] = await Promise.all([
+      fetch(v('data/termine.txt')),
+      fetch(v('data/actions.json')),
+      fetch(v('data/learn.txt')),
+      fetch(v('knowledge/links.json')),
+      fetch(v('knowledge/learningplan.json')),
+      fetch(v('knowledge/learningplan_progress.json')),
+      fetch(v('knowledge/sport.json')),
+      fetch(v('data/notes.json')),
+      fetch(v('data/sync_files.json')),
+      fetch(v('data/contacts.json')),
     ]);
     if (tRes.ok)   rawTermine       = await tRes.text();
     if (aRes.ok)   actionsData      = await aRes.json();
     if (lRes.ok)   rawLearn         = await lRes.text();
     if (lnRes.ok)  linksData        = await lnRes.json();
-    if (lpRes.ok)  lernplanData     = await lpRes.json();
-    if (lpProg.ok) lernplanProgress = await lpProg.json();
+    if (lpRes.ok)  learningplanData     = await lpRes.json();
+    if (lpProg.ok) learningplanProgress = await lpProg.json();
     if (spRes.ok)  sportData        = await spRes.json();
     if (nRes.ok)   notizenData      = await nRes.json();
     if (sfRes.ok)  syncFiles        = await sfRes.json();
+    if (ctRes.ok)  contactsData     = await ctRes.json();
   } catch(e) { console.error('Load error', e); }
   await loadICSAuto();
   aktiverFokusTab = defaultFokusTab();
@@ -207,10 +299,11 @@ function syncFokusTabUI() {
   document.querySelectorAll('.fokus-tab').forEach(b =>
     b.classList.toggle('active', b.dataset.tab === aktiverFokusTab)
   );
-  document.getElementById('btn-add-learn').style.display     = (aktiverFokusTab === 'links')   ? '' : 'none';
-  document.getElementById('btn-add-notiz').style.display     = (aktiverFokusTab === 'notizen') ? '' : 'none';
-  document.getElementById('btn-plan-next-day').style.display = (aktiverFokusTab === 'notizen') ? '' : 'none';
-  const hasBtn = aktiverFokusTab === 'links' || aktiverFokusTab === 'notizen';
+  document.getElementById('btn-add-learn').style.display     = (aktiverFokusTab === 'links')    ? '' : 'none';
+  document.getElementById('btn-add-notiz').style.display     = (aktiverFokusTab === 'notizen')  ? '' : 'none';
+  document.getElementById('btn-plan-next-day').style.display = (aktiverFokusTab === 'notizen')  ? '' : 'none';
+  document.getElementById('btn-add-contact').style.display   = (aktiverFokusTab === 'netzwerk') ? '' : 'none';
+  const hasBtn = aktiverFokusTab === 'links' || aktiverFokusTab === 'notizen' || aktiverFokusTab === 'netzwerk';
   document.querySelector('#tile-fokus .tile-footer').classList.toggle('has-button', hasBtn);
   document.getElementById('btn-fokus-placeholder').style.display = hasBtn ? 'none' : '';
 }
@@ -271,15 +364,15 @@ function saveLinksFile() {
 }
 
 function saveLernplanProgress() {
-  fetch(`${WRITE_SERVER}/lernplan_progress.json`, {
+  fetch(`${WRITE_SERVER}/learningplan_progress.json`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json; charset=utf-8' },
-    body: JSON.stringify(lernplanProgress, null, 2),
+    body: JSON.stringify(learningplanProgress, null, 2),
   }).catch(() => {});
 }
 
 function saveNotizenFile() {
-  fetch(`${WRITE_SERVER}/notizen.json`, {
+  fetch(`${WRITE_SERVER}/notes.json`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json; charset=utf-8' },
     body: JSON.stringify(notizenData, null, 2),
@@ -329,7 +422,7 @@ function renderKalender() {
       const badges = (e.tentative ? ' <span class="cal-badge cal-badge-tent" title="Tentativ">?</span>' : '')
                    + (e.optional  ? ' <span class="cal-badge cal-badge-opt"  title="Optional">opt</span>' : '');
       if (e.allDay) {
-        return `<div class="cal-item cal-allday-item${extraCls ? ' ' + extraCls : ''}${e.tentative ? ' cal-tentative' : ''}${e.optional ? ' cal-optional' : ''}">
+        return `<div class="cal-item cal-allday-item${extraCls ? ' ' + extraCls : ''}">
           <span class="cal-dot"></span>
           <span class="cal-time" style="font-style:italic">Ganztag</span>
           <span>${e.title}${badges}${syncLink}</span>
@@ -341,10 +434,8 @@ function renderKalender() {
       const current  = curMin >= startMin && curMin <= endMin;
       let cls = 'cal-item';
       if (extraCls) cls += ' ' + extraCls;
-      else if (past)    cls += ' cal-past';
       else if (current) cls += ' cal-current';
-      else if (e.tentative) cls += ' cal-tentative';
-      else if (e.optional)  cls += ' cal-optional';
+      else if (past)    cls += ' cal-past';
       return `<div class="${cls}">
         <span class="cal-dot"></span>
         <span class="cal-time">${fmtTime(e.startDate)}–${fmtTime(e.endDate)}</span>
@@ -405,7 +496,8 @@ function switchFokusTab(tab) {
   document.getElementById('btn-add-learn').style.display   = (tab === 'links')   ? '' : 'none';
   document.getElementById('btn-add-notiz').style.display   = (tab === 'notizen') ? '' : 'none';
   document.getElementById('btn-plan-next-day').style.display = (tab === 'notizen') ? '' : 'none';
-  const hasBtn = tab === 'links' || tab === 'notizen';
+  document.getElementById('btn-add-contact').style.display = (tab === 'netzwerk') ? '' : 'none';
+  const hasBtn = tab === 'links' || tab === 'notizen' || tab === 'netzwerk';
   document.querySelector('#tile-fokus .tile-footer').classList.toggle('has-button', hasBtn);
   renderFokus();
 }
@@ -427,6 +519,12 @@ function renderFokus() {
     return;
   }
 
+  if (aktiverFokusTab === 'netzwerk') {
+    fokusKat.textContent = contactsData.length ? `${contactsData.length} Kontakte` : '';
+    renderNetzwerk(fokusBody);
+    return;
+  }
+
   if (aktiverFokusTab === 'wissen') {
     fokusKat.textContent = 'Hörbücher';
     renderWissen(fokusBody);
@@ -439,8 +537,8 @@ function renderFokus() {
     return;
   }
 
-  // fuehrung + tech: flat lernplan lists
-  if (lernplanData && lernplanData.weeks) {
+  // fuehrung + tech: flat learningplan lists
+  if (learningplanData && learningplanData.weeks) {
     const isFuehrung = aktiverFokusTab === 'fuehrung';
     fokusKat.textContent = isFuehrung ? 'Führung & People' : 'Tech & Engineering';
     renderLernplanFlat(fokusBody, isFuehrung);
@@ -463,27 +561,149 @@ function renderSportLinks(container) {
   ).join('');
 }
 
+function renderNetzwerk(container) {
+  if (!contactsData.length) {
+    container.innerHTML = '<div style="color:var(--text-muted);font-size:0.75rem;padding:8px 0">Keine Kontakte vorhanden.</div>';
+    return;
+  }
+  const searchEl = document.getElementById('nw-search');
+  const searchVal = searchEl ? searchEl.value : '';
+  const cursorPos = searchEl ? searchEl.selectionStart : 0;
+  const sortMode = localStorage.getItem('nwSort') || 'freq';
+  const sorted = [...contactsData].sort((a, b) => {
+    if (sortMode === 'alpha') return (a.name || '').localeCompare(b.name || '', 'de');
+    if (sortMode === 'dept') {
+      const da = (a.rolle || '').toLowerCase(), db = (b.rolle || '').toLowerCase();
+      return da.localeCompare(db, 'de') || (b.freq || 0) - (a.freq || 0);
+    }
+    return (b.freq || 0) - (a.freq || 0);
+  });
+  const q = searchVal.toLowerCase();
+  const filtered = q ? sorted.filter(c =>
+    (c.name || '').toLowerCase().includes(q) ||
+    (c.rolle || '').toLowerCase().includes(q)
+  ) : sorted;
+  const searchBar = `<input class="nw-search" id="nw-search" placeholder="Suche..." value="${escapeHtml(searchVal)}" oninput="renderFokus()" />`;
+  const toggleBar = `<div class="nw-sort-bar">
+    <button class="nw-sort-btn${sortMode === 'freq' ? ' nw-sort-active' : ''}" onclick="setNwSort('freq')">Haeufigkeit</button>
+    <button class="nw-sort-btn${sortMode === 'alpha' ? ' nw-sort-active' : ''}" onclick="setNwSort('alpha')">A-Z</button>
+    <button class="nw-sort-btn${sortMode === 'dept' ? ' nw-sort-active' : ''}" onclick="setNwSort('dept')">Abteilung</button>
+  </div>`;
+  container.innerHTML = searchBar + toggleBar + filtered.map((c) => {
+    const origIdx = contactsData.indexOf(c);
+    const rolle = c.rolle
+      ? `<div class="nw-rolle">${escapeHtml(c.rolle)}</div>`
+      : `<div class="nw-rolle nw-rolle-empty">Rolle / Notiz...</div>`;
+    const dates = c.first && c.last && c.first !== c.last
+      ? `${c.first} – ${c.last}` : (c.last || c.first || '');
+    return `<div class="nw-item" onclick="editNetzwerk(${origIdx})">
+      <div class="nw-left">
+        <div class="nw-name">${escapeHtml(c.name)}</div>
+        ${rolle}
+      </div>
+      <div class="nw-right">
+        <div class="nw-freq">${c.freq || 0}</div>
+        <div class="nw-dates">${dates}</div>
+      </div>
+    </div>`;
+  }).join('');
+  const newSearch = document.getElementById('nw-search');
+  if (newSearch && searchVal) {
+    newSearch.focus();
+    newSearch.setSelectionRange(cursorPos, cursorPos);
+  }
+}
+
+function setNwSort(mode) {
+  localStorage.setItem('nwSort', mode);
+  renderFokus();
+}
+
+function editNetzwerk(idx) {
+  const c = contactsData[idx];
+  if (!c) return;
+  document.getElementById('modal-netzwerk-name').textContent = c.name;
+  document.getElementById('edit-netzwerk-rolle').value = c.rolle || '';
+  const modal = document.getElementById('modal-netzwerk');
+  modal.dataset.editIdx = idx;
+  modal.style.display = 'flex';
+  setModalLock();
+  document.getElementById('edit-netzwerk-rolle').focus();
+}
+
+async function saveContactRole(name, rolle) {
+  try {
+    const res = await fetch(v('data/contacts.json'));
+    if (!res.ok) return;
+    const fresh = await res.json();
+    const entry = fresh.find(c => c.name === name);
+    if (entry) {
+      entry.rolle = rolle;
+      await fetch(`${WRITE_SERVER}/contacts.json`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json; charset=utf-8' },
+        body: JSON.stringify(fresh, null, 2),
+      });
+    }
+    contactsData = fresh;
+  } catch(e) { console.error('saveContactRole error:', e); }
+}
+
+function toShortName(full) {
+  if (!full) return '';
+  const trimmed = full.trim();
+  if (/^DL\s/i.test(trimmed) || /^SAP\s/i.test(trimmed) || /^Cloud\s/i.test(trimmed) || /\(external/i.test(trimmed) || /[_\d]/.test(trimmed)) return '';
+  if (trimmed.includes(',')) {
+    const [last, first] = trimmed.split(',').map(s => s.trim());
+    if (first && last) return `${first} ${last[0].toUpperCase()}.`;
+    return '';
+  }
+  const parts = trimmed.split(/\s+/);
+  if (parts.length <= 1) return '';
+  return `${parts[0]} ${parts[parts.length - 1][0].toUpperCase()}.`;
+}
+
+async function addContact(name, rolle) {
+  try {
+    const res = await fetch(v('data/contacts.json'));
+    if (!res.ok) return;
+    const fresh = await res.json();
+    if (fresh.find(c => c.name === name)) {
+      alert('Kontakt "' + name + '" existiert bereits.');
+      return;
+    }
+    const today = todayStr();
+    fresh.push({ name, rolle, first: today, last: today, mailFreq: 0, meetFreq: 0, freq: 0, _weekId: '' });
+    await fetch(`${WRITE_SERVER}/contacts.json`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json; charset=utf-8' },
+      body: JSON.stringify(fresh, null, 2),
+    });
+    contactsData = fresh;
+  } catch(e) { console.error('addContact error:', e); }
+}
+
 function renderLernplanFlat(container, isFuehrung) {
-  const allDays = lernplanData.weeks.flatMap(w => w.days);
+  const allDays = learningplanData.weeks.flatMap(w => w.days);
   const filtered = allDays.filter(d => {
     const topics = (d.topics || []).map(t => t.toLowerCase());
     const hasFuehrung = topics.some(t => FUEHRUNG_TOPICS.has(t));
     return isFuehrung ? hasFuehrung : !hasFuehrung;
   });
   const total = filtered.length;
-  const done  = filtered.filter(d => lernplanProgress[d.day]).length;
-  let html = `<div class="lernplan-header">
-    <span class="lernplan-title">${isFuehrung ? '👥' : '⚙️'} ${total} Themen</span>
-    <span class="lernplan-total">${done}/${total}</span>
+  const done  = filtered.filter(d => learningplanProgress[d.day]).length;
+  let html = `<div class="learningplan-header">
+    <span class="learningplan-title">${isFuehrung ? '👥' : '⚙️'} ${total} Themen</span>
+    <span class="learningplan-total">${done}/${total}</span>
   </div>`;
   html += filtered.map(day => {
-    const isDone = !!lernplanProgress[day.day];
-    return `<div class="lernplan-day${isDone ? ' lernplan-done' : ''}">
-      <input type="checkbox" class="lernplan-cb" id="lp-${day.day}"
+    const isDone = !!learningplanProgress[day.day];
+    return `<div class="learningplan-day${isDone ? ' learningplan-done' : ''}">
+      <input type="checkbox" class="learningplan-cb" id="lp-${day.day}"
         ${isDone ? 'checked' : ''} onchange="toggleLernplanDay(${day.day}, this.checked)">
       <label for="lp-${day.day}">
         <a href="${escapeHtml(day.url)}" target="_blank">
-          ${escapeHtml(day.title)} <span class="lernplan-creator">(${escapeHtml(day.creator)})</span>
+          ${escapeHtml(day.title)} <span class="learningplan-creator">(${escapeHtml(day.creator)})</span>
         </a>
       </label>
     </div>`;
@@ -508,10 +728,10 @@ function renderLernplan() {} // unused, kept for safety
 
 function renderWissen(container) {
   Promise.allSettled([
-    fetch('Wissen/hörbuch.json').then(r => r.json()),
-    fetch('Wissen/hinterbliebenen.json').then(r => r.json()),
-    fetch('Wissen/leistungsabfall.json').then(r => r.json()),
-  ]).then(([hoerbuchRes, hinterbliebenenRes, leistungsabfallRes]) => {
+    fetch('knowledge/audiobooks.json').then(r => r.json()),
+    fetch('knowledge/survivors.json').then(r => r.json()),
+    fetch('knowledge/performance.json').then(r => r.json()),
+  ]).then(([audiobooksRes, survivorsRes, performanceRes]) => {
     const renderBuecher = (data, icon) => data.map(b => {
       const gedanken = (b.kerngedanken || []).map(g =>
         `<div class="wissen-gedanke-item">
@@ -537,13 +757,13 @@ function renderWissen(container) {
       `<div class="wissen-section-header">${label}</div>`;
 
     let html = '';
-    if (hoerbuchRes.status === 'fulfilled') {
+    if (audiobooksRes.status === 'fulfilled') {
       html += sectionHeader('📖 Hörbücher');
-      html += renderBuecher(hoerbuchRes.value, '📖');
+      html += renderBuecher(audiobooksRes.value, '📖');
     }
     const miscItems = [
-      hinterbliebenenRes.status === 'fulfilled' ? renderBuecher(hinterbliebenenRes.value, '📋') : '',
-      leistungsabfallRes.status === 'fulfilled' ? renderBuecher(leistungsabfallRes.value, '📉') : '',
+      survivorsRes.status === 'fulfilled' ? renderBuecher(survivorsRes.value, '📋') : '',
+      performanceRes.status === 'fulfilled' ? renderBuecher(performanceRes.value, '📉') : '',
     ].filter(Boolean).join('');
     if (miscItems) {
       html += sectionHeader('🗂 Misc');
@@ -565,19 +785,26 @@ function formatNotizText(text) {
   }).join('<br>');
 }
 
+function isPlanningPast(titel) {
+  const m = titel.match(/^Planung KW\d+-(MO|DI|MI|DO|FR)$/);
+  if (!m) return false;
+  const dayMap = { MO: 1, DI: 2, MI: 3, DO: 4, FR: 5 };
+  const planDow = dayMap[m[1]];
+  const todayDow = new Date().getDay();
+  return planDow < todayDow;
+}
+
 function renderNotizen(container) {
   if (!notizenData.length) {
     container.innerHTML = '<div class="notiz-empty">Noch keine Notizen. Oben erfassen.</div>';
     return;
   }
-  // preserve open state of <details> by index
   const openSet = new Set(
-    [...container.querySelectorAll('details.notiz-item')].reduce((acc, el, i) => {
-      if (el.open) acc.push(i); return acc;
-    }, [])
+    [...container.querySelectorAll('details.notiz-item')].filter(el => el.open).map(el => el.dataset.titel)
   );
-  container.innerHTML = notizenData.map((n, idx) =>
-    `<details class="notiz-item"${openSet.has(idx) ? ' open' : ''}>
+  container.innerHTML = notizenData.map((n, idx) => {
+    const pastClass = isPlanningPast(n.titel) ? ' notiz-past' : '';
+    return `<details class="notiz-item${pastClass}" data-titel="${escapeHtml(n.titel)}"${openSet.has(n.titel) ? ' open' : ''}>
       <summary class="notiz-summary">
         <span class="notiz-titel">${escapeHtml(n.titel)}</span>
         <span class="notiz-datum">${n.datum}</span>
@@ -585,8 +812,8 @@ function renderNotizen(container) {
         <button class="btn-x notiz-del" title="Löschen" onclick="deleteNotiz(event,${idx})">✕</button>
       </summary>
       <div class="notiz-body">${formatNotizText(n.text)}</div>
-    </details>`
-  ).join('');
+    </details>`;
+  }).join('');
 }
 
 function editNotiz(e, idx) {
@@ -610,7 +837,7 @@ function deleteNotiz(e, idx) {
 }
 
 function toggleLernplanDay(day, checked) {
-  lernplanProgress[day] = checked;
+  learningplanProgress[day] = checked;
   saveLernplanProgress();
   if (aktiverFokusTab === 'fuehrung' || aktiverFokusTab === 'tech') renderFokus();
 }
@@ -772,6 +999,38 @@ document.getElementById('btn-save-notiz').addEventListener('click', () => {
   document.getElementById('new-notiz-text').value  = '';
 });
 
+document.getElementById('btn-save-netzwerk').addEventListener('click', async () => {
+  const modal   = document.getElementById('modal-netzwerk');
+  const editIdx = modal.dataset.editIdx !== undefined ? parseInt(modal.dataset.editIdx) : -1;
+  if (editIdx < 0) return;
+  const c = contactsData[editIdx];
+  if (!c) return;
+  const newRolle = document.getElementById('edit-netzwerk-rolle').value.trim();
+  c.rolle = newRolle;
+  await saveContactRole(c.name, newRolle);
+  renderFokus();
+  closeModal('modal-netzwerk');
+  delete modal.dataset.editIdx;
+});
+
+document.getElementById('btn-add-contact').addEventListener('click', () => {
+  document.getElementById('new-contact-name').value = '';
+  document.getElementById('new-contact-rolle').value = '';
+  document.getElementById('modal-add-contact').style.display = 'flex';
+  setModalLock();
+  document.getElementById('new-contact-name').focus();
+});
+
+document.getElementById('btn-save-new-contact').addEventListener('click', async () => {
+  const rawName = document.getElementById('new-contact-name').value.trim();
+  const rolle   = document.getElementById('new-contact-rolle').value.trim();
+  if (!rawName) return;
+  const name = toShortName(rawName) || rawName;
+  await addContact(name, rolle);
+  renderFokus();
+  closeModal('modal-add-contact');
+});
+
 let planPolling = false;
 document.getElementById('btn-plan-next-day').addEventListener('click', async () => {
   if (planPolling) return;
@@ -780,12 +1039,12 @@ document.getElementById('btn-plan-next-day').addEventListener('click', async () 
   btn.textContent = '⟳ …';
   const triggeredAt = Date.now();
   try {
-    await fetch(`${WRITE_SERVER}/run-plan-next-day`, { method: 'POST' });
+    await fetch(`${WRITE_SERVER}/run-plan-week`, { method: 'POST' });
   } catch(e) {}
-  const deadline = triggeredAt + 5 * 60000;
+  const deadline = triggeredAt + 8 * 60000;
   const poll = async () => {
     try {
-      const r = await fetch('Daten/notizen.json?v=' + Date.now());
+      const r = await fetch('data/notes.json?v=' + Date.now());
       if (r.ok) {
         const data = await r.json();
         const found = data.find(n => n.titel && n.titel.startsWith('Planung KW') && n.ts >= triggeredAt);
@@ -814,7 +1073,7 @@ function openSyncModal(file, name) {
   body.innerHTML = '<div style="color:var(--text-muted);font-size:0.75rem;padding:8px 0">Lade…</div>';
   document.getElementById('modal-sync').style.display = '';
   setModalLock();
-  fetch('Daten/' + file)
+  fetch('data/' + file)
     .then(r => r.json())
     .then(mails => {
       if (!mails.length) {
@@ -1002,7 +1261,7 @@ function mailPrio(m) {
 
 async function loadMails(skipRender = false) {
   try {
-    const res = await fetch(v('Daten/mails_heute.json'));
+    const res = await fetch(v('data/mails_today.json'));
     if (!res.ok) return;
     mailData = await res.json();
     if (!skipRender) renderMails();
@@ -1095,7 +1354,7 @@ async function checkSummaryExists() {
   const kw = currentKW();
   const btn = document.getElementById('btn-show-summary');
   try {
-    const res = await fetch(`Daten/summary_KW${kw}.json?v=` + Date.now());
+    const res = await fetch(`data/summary_KW${kw}.json?v=` + Date.now());
     if (res.ok) {
       const data = await res.json();
       if (data.summary) {
@@ -1136,7 +1395,7 @@ async function showSavedSummary() {
   const kw = currentKW();
   const body = document.getElementById('mails-body');
   try {
-    const res = await fetch(`Daten/summary_KW${kw}.json?v=` + Date.now());
+    const res = await fetch(`data/summary_KW${kw}.json?v=` + Date.now());
     const data = await res.json();
     body.innerHTML = `<div class="mail-summary">${renderSummaryHtml(data.summary)}</div>
       <button class="btn-ghost" style="margin-top:8px;font-size:0.65rem" onclick="renderMails()">← Liste anzeigen</button>`;
@@ -1171,7 +1430,7 @@ async function renderHistory() {
 
   const results = await Promise.all(candidates.map(async ({ kw, yr }) => {
     try {
-      const res = await fetch(`Daten/summary_KW${kw}.json?v=` + Date.now());
+      const res = await fetch(`data/summary_KW${kw}.json?v=` + Date.now());
       if (!res.ok) return null;
       const data = await res.json();
       if (!data.summary) return null;
@@ -1234,7 +1493,7 @@ async function summarizeMails() {
   // Poll sync status until mail_sync_status.json reflects the new export
   const pollSync = async () => {
     try {
-      const r = await fetch('Daten/mail_sync_status.json?v=' + Date.now());
+      const r = await fetch('data/mail_sync_status.json?v=' + Date.now());
       if (r.ok) {
         const d = await r.json();
         if (d.ts >= exportedAt) { updateSyncStatus(); return; }
@@ -1244,7 +1503,7 @@ async function summarizeMails() {
   };
   setTimeout(pollSync, 5000);
 
-  // 2. Reload mails_heute.json into mailData (no re-render)
+  // 2. Reload mails_today.json into mailData (no re-render)
   await loadMails(true);
   if (!mailData.length) {
     body.innerHTML = '<div style="color:var(--text-muted);font-size:0.75rem;padding:8px 0">Keine Mails gefunden.</div>';
@@ -1261,7 +1520,7 @@ async function summarizeMails() {
 
   const deadline = requestedAt + 10 * 60000;
   const kw = currentKW();
-  const summaryFile = `Daten/summary_KW${kw}.json`;
+  const summaryFile = `data/summary_KW${kw}.json`;
 
   const poll = async () => {
     try {
@@ -1300,14 +1559,14 @@ async function checkServerStatus() {
   }
 }
 checkServerStatus();
-setInterval(checkServerStatus, 30000);
+setInterval(checkServerStatus, 5 * 60000);
 
 // ── Mail sync status ───────────────────────────────────────────────────────
 async function updateSyncStatus() {
   const el = document.getElementById('mail-sync-status');
   if (!el) return;
   try {
-    const r = await fetch('Daten/mail_sync_status.json?v=' + Date.now());
+    const r = await fetch('data/mail_sync_status.json?v=' + Date.now());
     if (!r.ok) { el.textContent = ''; return; }
     const d = await r.json();
     const last    = new Date(d.ts);
@@ -1325,18 +1584,21 @@ async function updateSyncStatus() {
 }
 
 // ── Init ───────────────────────────────────────────────────────────────────
-fetch('Daten/config.json').then(r => r.json()).then(cfg => {
+fetch('data/config.json').then(r => r.json()).then(cfg => {
   if (cfg.myAddresses) MY_ADDRESSES = cfg.myAddresses;
 }).catch(() => {}).finally(() => {
   applyMode(expertMode);
   loadAll();
   loadMails();
   const startedAt = Date.now();
-  fetch(`${WRITE_SERVER}/run-export-mails`, { method: 'POST' }).catch(() => {});
+  const hh = new Date().getHours();
+  if (hh >= 7 && hh < 13) {
+    fetch(`${WRITE_SERVER}/run-export-mails`, { method: 'POST' }).catch(() => {});
+  }
   updateSyncStatus();
   const pollSyncInit = async () => {
     try {
-      const r = await fetch('Daten/mail_sync_status.json?v=' + Date.now());
+      const r = await fetch('data/mail_sync_status.json?v=' + Date.now());
       if (r.ok) {
         const d = await r.json();
         if (d.ts >= startedAt) { updateSyncStatus(); return; }
@@ -1347,8 +1609,8 @@ fetch('Daten/config.json').then(r => r.json()).then(cfg => {
   setTimeout(pollSyncInit, 5000);
 });
 setInterval(renderHeader, 60000);
-setInterval(loadICSAuto, 15 * 60000);
+setInterval(loadICSAuto, 30 * 60000);
 setInterval(() => {
   const anyOpen = document.querySelector('.mail-body[style*="display: block"], .mail-body[style*="display:block"]');
   if (!anyOpen) loadMails();
-}, 5 * 60000);
+}, 30 * 60000);

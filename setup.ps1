@@ -40,20 +40,20 @@ if (Test-Path "$appDir\secrets.ps1") {
     Write-Fail "secrets.ps1 fehlt! Bitte anlegen (Vorlage in PROJEKT_DOKUMENTATION.md Abschnitt 9.1)"
 }
 
-# Daten-Verzeichnis
-if (-not (Test-Path "$appDir\Daten")) {
-    New-Item -ItemType Directory -Path "$appDir\Daten" | Out-Null
-    Write-OK "Daten/ angelegt"
+# data directory
+if (-not (Test-Path "$appDir\data")) {
+    New-Item -ItemType Directory -Path "$appDir\data" | Out-Null
+    Write-OK "data/ angelegt"
 } else {
-    Write-OK "Daten/ vorhanden"
+    Write-OK "data/ vorhanden"
 }
 
-# Wissen-Verzeichnis
-if (-not (Test-Path "$appDir\Wissen")) {
-    New-Item -ItemType Directory -Path "$appDir\Wissen" | Out-Null
-    Write-Warn "Wissen/ neu angelegt - bitte JSON-Dateien einspielen"
+# knowledge directory
+if (-not (Test-Path "$appDir\knowledge")) {
+    New-Item -ItemType Directory -Path "$appDir\knowledge" | Out-Null
+    Write-Warn "knowledge/ neu angelegt - bitte JSON-Dateien einspielen"
 } else {
-    Write-OK "Wissen/ vorhanden"
+    Write-OK "knowledge/ vorhanden"
 }
 
 # C:\Temp fuer modal.lock
@@ -99,7 +99,7 @@ $trNode   = New-TR $node "`\`"$appDir\write-server.js`\`""
 $trMail   = New-TR $ps   "-NonInteractive -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File `\`"$appDir\export_outlook_mails.ps1`\`""
 $trSync   = New-TR $ps   "-NonInteractive -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File `\`"$appDir\export_sync_prep.ps1`\`""
 $trCal    = New-TR $ps   "-NonInteractive -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File `\`"$appDir\export_outlook_today.ps1`\`""
-$trPlan   = New-TR $ps   "-NonInteractive -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File `\`"$appDir\plan_next_day.ps1`\`""
+$trPlan   = New-TR $ps   "-NonInteractive -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File `\`"$appDir\plan_week.ps1`\`""
 
 $r = schtasks /create /tn "MyApp Write Server" /tr $trNode /sc ONLOGON /ru $currentUser /it /f 2>&1
 if ($LASTEXITCODE -eq 0) {

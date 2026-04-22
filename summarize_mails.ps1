@@ -4,7 +4,7 @@
 . "$PSScriptRoot\secrets.ps1"
 
 $scriptDir  = Split-Path -Parent $MyInvocation.MyCommand.Path
-$outputDir  = Join-Path $scriptDir "Daten"
+$outputDir  = Join-Path $scriptDir "data"
 if (-not (Test-Path $outputDir)) { New-Item -ItemType Directory -Path $outputDir | Out-Null }
 
 if (Test-Path "C:\Temp\myapp-modal.lock") {
@@ -12,7 +12,7 @@ if (Test-Path "C:\Temp\myapp-modal.lock") {
     exit
 }
 
-$mailsFile   = Join-Path $outputDir "mails_heute.json"
+$mailsFile   = Join-Path $outputDir "mails_today.json"
 $kw          = Get-Date -UFormat "%V"
 $summaryFile = Join-Path $outputDir "summary_KW$kw.json"
 

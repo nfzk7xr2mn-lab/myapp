@@ -1,12 +1,12 @@
 # export_sync_prep.ps1
 # Checks tomorrow's calendar for 1:1 sync appointments with team members.
 # For each match, exports the last 2 weeks of emails to/from that person
-# as Daten/KW{n}-{Vorname}.json
+# as data/KW{n}-{Vorname}.json
 
 . "$PSScriptRoot\secrets.ps1"
 
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-$outputDir = Join-Path $scriptDir "Daten"
+$outputDir = Join-Path $scriptDir "data"
 if (-not (Test-Path $outputDir)) { New-Item -ItemType Directory -Path $outputDir | Out-Null }
 
 # Chef + alle Mitarbeiter als Suchpool

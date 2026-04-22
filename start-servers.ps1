@@ -22,10 +22,19 @@ Start-Process "node" -ArgumentList "`"$appDir\write-server.js`"" `
     -WindowStyle Minimized
 
 # Live server (port 5500) – assumes live-server is installed globally
-Start-Process "cmd" -ArgumentList "/c npx live-server --port=5500 --no-browser --ignore=`"Daten,Wissen`" `"$appDir`"" `
+Start-Process "cmd" -ArgumentList "/c npx live-server --port=5500 --no-browser --ignore=`"data,knowledge`" `"$appDir`"" `
     -WorkingDirectory $appDir `
     -WindowStyle Minimized
 
 Write-Host "Servers gestartet:" -ForegroundColor Green
 Write-Host "  App:          http://127.0.0.1:5500" -ForegroundColor Cyan
 Write-Host "  Write server: http://127.0.0.1:9001" -ForegroundColor Cyan
+
+Start-Sleep -Milliseconds 2000
+$chrome = "C:\Program Files\Google\Chrome\Application\chrome.exe"
+if (Test-Path $chrome) {
+    Start-Process $chrome -ArgumentList "--app=http://127.0.0.1:5500 --window-size=1280,64 --window-position=0,736"
+    Write-Host "  Chrome App gestartet" -ForegroundColor Cyan
+} else {
+    Write-Host "  Chrome nicht gefunden - bitte manuell oeffnen: http://127.0.0.1:5500" -ForegroundColor Yellow
+}

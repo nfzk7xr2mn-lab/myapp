@@ -3,7 +3,8 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Mein Fokus Dashboard</title>
+  <title>Dein Tag. Deine Richtung. Deine Entscheidungen.</title>
+  <link rel="icon" type="image/png" href="data/logo_small.png" />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="style.css" />
 </head>
@@ -13,11 +14,16 @@
     <!-- HEADER -->
     <header id="header">
       <div id="header-left">
+        <img src="data/logo_small.png" alt="Logo" id="header-logo" />
         <div id="clock"></div>
         <div id="date-label"></div>
       </div>
       <div id="phase-badge"></div>
-      <div id="server-status" title="write-server"></div>
+      <div style="display:flex;align-items:center;gap:8px;margin-left:auto">
+        <div id="header-tagline">Dein Tag. Deine Richtung. Deine Entscheidungen.</div>
+        <div id="server-status" title="write-server"></div>
+        <button id="btn-mode-toggle-expert" class="btn-mode" title="Grundmodus (E)" onclick="applyMode(false)">⊟</button>
+      </div>
     </header>
 
     <!-- SIMPLE BAR (Grundmodus) -->
@@ -27,30 +33,32 @@
       <div id="sb-phase"></div>
       <div class="sb-sep"></div>
       <div id="sb-cal"></div>
+      <button id="btn-refresh-cal" title="Kalender aktualisieren">⟳</button>
       <div class="sb-sep"></div>
       <div id="sb-mail"></div>
+      <div id="sb-badges"></div>
       <button id="btn-mode-toggle" title="Expertenmodus (E)">⊞</button>
     </div>
 
     <!-- MAIN TILES -->
     <main id="tiles">
 
-      <!-- TILE 1: KALENDER -->
+      <!-- TILE 1: DATEN -->
       <section class="tile" id="tile-kalender">
         <div class="tile-header">
           <span class="tile-icon">📅</span>
-          <span class="tile-title">Kalender</span>
+          <span class="tile-title">Daten</span>
           <span class="tile-sub" id="cal-date"></span>
         </div>
         <div class="tile-body" id="cal-body"></div>
-        <div class="tile-footer"><button class="btn-ghost" style="border-color:transparent">&nbsp;</button></div>
+        <div class="tile-footer"><button class="btn-ghost" id="btn-refresh-cal-expert" title="Kalender aus Outlook neu exportieren">⟳ Aktualisieren</button></div>
       </section>
 
-      <!-- TILE 2: FOKUS -->
+      <!-- TILE 2: INSTRUKTIONEN -->
       <section class="tile" id="tile-fokus">
         <div class="tile-header">
           <span class="tile-icon">🎯</span>
-          <span class="tile-title">Fokus</span>
+          <span class="tile-title">Instruktionen</span>
           <span class="tile-sub" id="fokus-kategorie"></span>
         </div>
         <div class="fokus-tabs">
@@ -60,21 +68,23 @@
           <button class="fokus-tab" data-tab="tech"     onclick="switchFokusTab('tech')">Tech</button>
           <button class="fokus-tab" data-tab="links"    onclick="switchFokusTab('links')">Links</button>
           <button class="fokus-tab" data-tab="wissen"   onclick="switchFokusTab('wissen')">Wissen</button>
+          <button class="fokus-tab" data-tab="netzwerk" onclick="switchFokusTab('netzwerk')">Netzwerk</button>
         </div>
         <div class="tile-body" id="fokus-body"></div>
         <div class="tile-footer">
           <button class="btn-ghost" id="btn-add-notiz" style="display:none">+ Notiz</button>
           <button class="btn-ghost" id="btn-plan-next-day" style="display:none">⟳ Planung</button>
           <button class="btn-ghost" id="btn-add-learn" style="display:none">+ Link</button>
+          <button class="btn-ghost" id="btn-add-contact" style="display:none">+ Kontakt</button>
           <button class="btn-ghost" id="btn-fokus-placeholder" style="border-color:transparent;color:transparent">&nbsp;</button>
         </div>
       </section>
 
-      <!-- TILE 3: ACTIONS -->
+      <!-- TILE 3: AKTIONEN -->
       <section class="tile" id="tile-actions">
         <div class="tile-header">
           <span class="tile-icon">⚡</span>
-          <span class="tile-title">Actions</span>
+          <span class="tile-title">Aktionen</span>
           <span class="tile-sub" id="actions-count"></span>
         </div>
         <div class="actions-tabs">
@@ -87,11 +97,11 @@
         </div>
       </section>
 
-      <!-- TILE 4: MAILS -->
+      <!-- TILE 4: KORRESPONDENZ -->
       <section class="tile" id="tile-mails">
         <div class="tile-header">
           <span class="tile-icon">✉️</span>
-          <span class="tile-title">Mails</span>
+          <span class="tile-title">Korrespondenz</span>
           <span class="tile-sub" id="mails-count"></span>
           <span class="tile-sub" id="mail-sync-status" style="margin-left:auto;font-size:0.62rem;color:var(--text-muted)"></span>
         </div>
@@ -156,6 +166,32 @@
         <button class="btn-ghost" onclick="closeModal('modal-sync')">✕</button>
       </div>
       <div id="modal-sync-body"></div>
+    </div>
+  </div>
+
+  <!-- MODAL: Netzwerk Kontakt bearbeiten -->
+  <div class="modal-overlay" id="modal-netzwerk" style="display:none" onclick="if(event.target===this)closeModal('modal-netzwerk')">
+    <div class="modal">
+      <div class="modal-title">Kontakt bearbeiten</div>
+      <div id="modal-netzwerk-name" style="font-size:0.8rem;color:var(--gold);margin-bottom:6px;font-weight:600"></div>
+      <textarea class="modal-input modal-textarea" id="edit-netzwerk-rolle" placeholder="Rolle / Notizen..." rows="3"></textarea>
+      <div class="modal-buttons">
+        <button class="btn-primary" id="btn-save-netzwerk">Speichern</button>
+        <button class="btn-ghost" onclick="closeModal('modal-netzwerk')">Abbrechen</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: Neuer Kontakt -->
+  <div class="modal-overlay" id="modal-add-contact" style="display:none" onclick="if(event.target===this)closeModal('modal-add-contact')">
+    <div class="modal">
+      <div class="modal-title">Neuer Kontakt</div>
+      <input class="modal-input" id="new-contact-name" placeholder="Vorname Nachname..." />
+      <textarea class="modal-input modal-textarea" id="new-contact-rolle" placeholder="Rolle / Notizen..." rows="3"></textarea>
+      <div class="modal-buttons">
+        <button class="btn-primary" id="btn-save-new-contact">Speichern</button>
+        <button class="btn-ghost" onclick="closeModal('modal-add-contact')">Abbrechen</button>
+      </div>
     </div>
   </div>
 
