@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Dein Tag. Deine Richtung. Deine Entscheidungen.</title>
-  <link rel="icon" type="image/png" href="data/logo_small.png" />
+  <link rel="icon" type="image/png" sizes="32x32" href="data/favicon-32.png" />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="style.css" />
 </head>
@@ -14,15 +14,16 @@
     <!-- HEADER -->
     <header id="header">
       <div id="header-left">
-        <img src="data/logo_small.png" alt="Logo" id="header-logo" />
+        <img src="data/logo_64.png" alt="Logo" id="header-logo" />
         <div id="clock"></div>
         <div id="date-label"></div>
       </div>
       <div id="phase-badge"></div>
       <div style="display:flex;align-items:center;gap:8px;margin-left:auto">
-        <div id="header-tagline">Dein Tag. Deine Richtung. Deine Entscheidungen.</div>
+        <div id="header-quote"></div>
+        <button id="btn-refresh-quote" class="btn-mode" title="Neues Zitat">⟳</button>
         <div id="server-status" title="write-server"></div>
-        <button id="btn-mode-toggle-expert" class="btn-mode" title="Grundmodus (E)" onclick="applyMode(false)">⊟</button>
+        <button id="btn-mode-toggle-expert" class="btn-mode" title="Fokusmodus (E)" onclick="cycleMode()">⊟</button>
       </div>
     </header>
 
@@ -35,7 +36,6 @@
       <div id="sb-cal"></div>
       <button id="btn-refresh-cal" title="Kalender aktualisieren">⟳</button>
       <div class="sb-sep"></div>
-      <div id="sb-mail"></div>
       <div id="sb-badges"></div>
       <button id="btn-mode-toggle" title="Expertenmodus (E)">⊞</button>
     </div>
@@ -46,8 +46,7 @@
       <!-- TILE 1: DATEN -->
       <section class="tile" id="tile-kalender">
         <div class="tile-header">
-          <span class="tile-icon">📅</span>
-          <span class="tile-title">Daten</span>
+          <span class="tile-title">Kalender</span>
           <span class="tile-sub" id="cal-date"></span>
         </div>
         <div class="tile-body" id="cal-body"></div>
@@ -57,18 +56,17 @@
       <!-- TILE 2: INSTRUKTIONEN -->
       <section class="tile" id="tile-fokus">
         <div class="tile-header">
-          <span class="tile-icon">🎯</span>
           <span class="tile-title">Instruktionen</span>
           <span class="tile-sub" id="fokus-kategorie"></span>
         </div>
         <div class="fokus-tabs">
-          <button class="fokus-tab" data-tab="notizen"  onclick="switchFokusTab('notizen')">Notizen</button>
-          <button class="fokus-tab" data-tab="sport"    onclick="switchFokusTab('sport')">Sport</button>
-          <button class="fokus-tab" data-tab="fuehrung" onclick="switchFokusTab('fuehrung')">Führung</button>
-          <button class="fokus-tab" data-tab="tech"     onclick="switchFokusTab('tech')">Tech</button>
           <button class="fokus-tab" data-tab="links"    onclick="switchFokusTab('links')">Links</button>
-          <button class="fokus-tab" data-tab="wissen"   onclick="switchFokusTab('wissen')">Wissen</button>
+          <button class="fokus-tab" data-tab="notizen"  onclick="switchFokusTab('notizen')">Notizen</button>
+          <button class="fokus-tab" data-tab="jira"     onclick="switchFokusTab('jira')">Jira</button>
           <button class="fokus-tab" data-tab="netzwerk" onclick="switchFokusTab('netzwerk')">Netzwerk</button>
+          <button class="fokus-tab" data-tab="ziele"    onclick="switchFokusTab('ziele')">Ziele</button>
+          <button class="fokus-tab" data-tab="wissen"   onclick="switchFokusTab('wissen')">Wissen</button>
+          <button class="fokus-tab" data-tab="news"     onclick="switchFokusTab('news')">Neues</button>
         </div>
         <div class="tile-body" id="fokus-body"></div>
         <div class="tile-footer">
@@ -76,6 +74,9 @@
           <button class="btn-ghost" id="btn-plan-next-day" style="display:none">⟳ Planung</button>
           <button class="btn-ghost" id="btn-add-learn" style="display:none">+ Link</button>
           <button class="btn-ghost" id="btn-add-contact" style="display:none">+ Kontakt</button>
+          <button class="btn-ghost" id="btn-sync-jira" style="display:none">⟳ Synchronisieren</button>
+          <button class="btn-ghost" id="btn-refresh-ziele" style="display:none">⟳ Aktualisieren</button>
+          <button class="btn-ghost" id="btn-refresh-news" style="display:none">⟳ Aktualisieren</button>
           <button class="btn-ghost" id="btn-fokus-placeholder" style="border-color:transparent;color:transparent">&nbsp;</button>
         </div>
       </section>
@@ -83,7 +84,6 @@
       <!-- TILE 3: AKTIONEN -->
       <section class="tile" id="tile-actions">
         <div class="tile-header">
-          <span class="tile-icon">⚡</span>
           <span class="tile-title">Aktionen</span>
           <span class="tile-sub" id="actions-count"></span>
         </div>
@@ -93,15 +93,14 @@
         </div>
         <div class="tile-body" id="actions-body"></div>
         <div class="tile-footer">
-          <button class="btn-ghost" id="btn-add-action">+ Action erfassen</button>
+          <button class="btn-ghost" id="btn-add-action">+ Aktion erfassen</button>
         </div>
       </section>
 
-      <!-- TILE 4: KORRESPONDENZ -->
+      <!-- TILE 4: MAILS -->
       <section class="tile" id="tile-mails">
         <div class="tile-header">
-          <span class="tile-icon">✉️</span>
-          <span class="tile-title">Korrespondenz</span>
+          <span class="tile-title">Mails</span>
           <span class="tile-sub" id="mails-count"></span>
           <span class="tile-sub" id="mail-sync-status" style="margin-left:auto;font-size:0.62rem;color:var(--text-muted)"></span>
         </div>
@@ -119,10 +118,10 @@
 
   </div>
 
-  <!-- MODAL: Neue Action -->
+  <!-- MODAL: Neue Aktion -->
   <div class="modal-overlay" id="modal-action" style="display:none">
     <div class="modal">
-      <div class="modal-title">Neue Action</div>
+      <div class="modal-title">Neue Aktion</div>
       <input class="modal-input" id="new-action-text" placeholder="Beschreibung…" />
       <input class="modal-input" id="new-action-due" placeholder="Fällig DD.MM. (leer = heute)" />
       <div class="modal-buttons">
@@ -178,6 +177,7 @@
       <div class="modal-buttons">
         <button class="btn-primary" id="btn-save-netzwerk">Speichern</button>
         <button class="btn-ghost" onclick="closeModal('modal-netzwerk')">Abbrechen</button>
+        <button class="btn-ghost" id="btn-delete-netzwerk" style="margin-left:auto;color:#e74c3c;border-color:rgba(231,76,60,0.3)">Entfernen</button>
       </div>
     </div>
   </div>
@@ -195,7 +195,6 @@
     </div>
   </div>
 
-  <script src="debug-check.js"></script>
   <script src="script.js"></script>
 </body>
 </html>

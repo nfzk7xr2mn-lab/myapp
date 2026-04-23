@@ -1,3 +1,4 @@
+# PRIVACY: contains PII (names, emails, API keys, mail bodies) -- never remove
 secrets.ps1
 data/
 knowledge/

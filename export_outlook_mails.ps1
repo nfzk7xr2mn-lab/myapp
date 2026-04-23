@@ -39,7 +39,7 @@ function Test-IstAuftrag($subject, $body) {
 function ConvertTo-ShortName($full) {
     if (-not $full) { return '' }
     $trimmed = $full.Trim()
-    if ($trimmed -match '^DL\s' -or $trimmed -match '^SAP\s' -or $trimmed -match '^Cloud\s' -or $trimmed -match '\(external' -or $trimmed -match '[_\d]') { return '' }
+    if ($trimmed -match '^DL\s' -or $trimmed -match '^SAP\s' -or $trimmed -match '\sSAP$' -or $trimmed -match '^SAP,' -or $trimmed -match ',\s*SAP' -or $trimmed -match '^Cloud\s' -or $trimmed -match '\(external' -or $trimmed -match '[_\d]') { return '' }
     if ($trimmed.Contains(',')) {
         $parts = $trimmed -split ',' | ForEach-Object { $_.Trim() }
         $last = $parts[0]; $first = $parts[1]
@@ -88,6 +88,27 @@ $excludeSenders = if ($ExcludeSenders) { $ExcludeSenders } else { @('itsm', 'sha
 
 $mails = @()
 
+# Department cache + resolver (used for chef detection and contact merge)
+$deptCache = @{}
+function Resolve-Contact($displayName) {
+    if (-not $displayName) { return @{ dept = ''; resolvedName = '' } }
+    if ($deptCache.ContainsKey($displayName)) { return $deptCache[$displayName] }
+    $result = @{ dept = ''; resolvedName = '' }
+    try {
+        $recip = $outlook.Session.CreateRecipient($displayName)
+        $recip.Resolve() | Out-Null
+        if ($recip.Resolved) {
+            $eu = $recip.AddressEntry.GetExchangeUser()
+            if ($eu) {
+                if ($eu.Department) { $result.dept = $eu.Department }
+                if ($eu.Name) { $result.resolvedName = $eu.Name }
+            }
+        }
+    } catch {}
+    $deptCache[$displayName] = $result
+    return $result
+}
+
 # Empfangene Mails
 foreach ($mail in $receivedItems) {
     try {
@@ -101,7 +122,9 @@ foreach ($mail in $receivedItems) {
         $iAmInTo  = ($MyAddresses + $MyDisplayNames) | Where-Object { $toLower -like "*$_*" }
         $iAmInCC  = ($MyAddresses + $MyDisplayNames) | Where-Object { $ccLower -like "*$_*" }
         $toCount  = if ($toField) { ($toField -split ';').Count } else { 0 }
-        $isChef   = $ChefNames | Where-Object { $fromLower -like "*$_*" }
+        $isChef   = $false
+        $resolved = Resolve-Contact $mail.SenderName
+        if ($resolved.dept -and $resolved.dept -eq $ChefDept) { $isChef = $true }
 
         $prio = if ($isChef)                          { 'chef' }
                 elseif ($iAmInTo -and $toCount -eq 1) { 'direct' }
@@ -190,7 +213,7 @@ $fullNameMap = @{}
 
 foreach ($m in $mails) {
     $dateStr = $m.date
-    if ($m.typ -eq 'empfangen') {
+    if ($m.typ -eq 'empfangen' -and ($m.prio -eq 'direct' -or $m.prio -eq 'chef')) {
         $sn = ConvertTo-ShortName $m.from
         if ($sn -and ($myShortNames -notcontains $sn.ToLower())) {
             if (-not $contactMap[$sn]) { $contactMap[$sn] = @{ mailFreq = 0; meetFreq = 0; first = $dateStr; last = $dateStr } }
@@ -200,58 +223,43 @@ foreach ($m in $mails) {
         }
     }
     elseif ($m.typ -eq 'gesendet' -and $m.to) {
-        foreach ($rcpt in ($m.to -split ';')) {
-            $sn = ConvertTo-ShortName $rcpt.Trim()
+        $rcpts = @($m.to -split ';' | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+        if ($rcpts.Count -eq 1) {
+            $sn = ConvertTo-ShortName $rcpts[0]
             if ($sn -and ($myShortNames -notcontains $sn.ToLower())) {
                 if (-not $contactMap[$sn]) { $contactMap[$sn] = @{ mailFreq = 0; meetFreq = 0; first = $dateStr; last = $dateStr } }
                 $contactMap[$sn].mailFreq++
                 $contactMap[$sn].last = $dateStr
-                if (-not $fullNameMap[$sn]) { $fullNameMap[$sn] = $rcpt.Trim() }
+                if (-not $fullNameMap[$sn]) { $fullNameMap[$sn] = $rcpts[0] }
             }
         }
     }
 }
 
-# Parse ATTENDEE from ICS files of current week
+# Parse ATTENDEE from ICS files (only meetings with max 8 attendees)
 foreach ($dayOff in 0..([Math]::Min(4, ($today - $weekStart).Days + 1))) {
     $icsDay  = $weekStart.AddDays($dayOff)
     $icsFile = Join-Path $outputDir ("calendar_" + $icsDay.ToString("yyyyMMdd") + ".ics")
     if (-not (Test-Path $icsFile)) { continue }
     $icsText = Get-Content $icsFile -Raw -Encoding UTF8
-    $cnMatches = [regex]::Matches($icsText, 'ATTENDEE;[^:]*CN=([^:;]+)')
     $icsDayStr = $icsDay.ToString("dd.MM.")
-    foreach ($cm in $cnMatches) {
-        $rawName = $cm.Groups[1].Value -replace '\\,', ',' -replace '\\;', ';'
-        $sn = ConvertTo-ShortName $rawName
-        if ($sn -and ($myShortNames -notcontains $sn.ToLower())) {
-            if (-not $contactMap[$sn]) { $contactMap[$sn] = @{ mailFreq = 0; meetFreq = 0; first = $icsDayStr; last = $icsDayStr } }
-            $contactMap[$sn].meetFreq++
-            if ($icsDayStr -lt $contactMap[$sn].first) { $contactMap[$sn].first = $icsDayStr }
-            if ($icsDayStr -gt $contactMap[$sn].last)  { $contactMap[$sn].last  = $icsDayStr }
-            if (-not $fullNameMap[$sn]) { $fullNameMap[$sn] = $rawName }
-        }
-    }
-}
-
-# Resolve Department from Outlook for contacts without rolle
-$deptCache = @{}
-function Resolve-Contact($displayName) {
-    if (-not $displayName) { return @{ dept = ''; resolvedName = '' } }
-    if ($deptCache.ContainsKey($displayName)) { return $deptCache[$displayName] }
-    $result = @{ dept = ''; resolvedName = '' }
-    try {
-        $recip = $outlook.Session.CreateRecipient($displayName)
-        $recip.Resolve() | Out-Null
-        if ($recip.Resolved) {
-            $eu = $recip.AddressEntry.GetExchangeUser()
-            if ($eu) {
-                if ($eu.Department) { $result.dept = $eu.Department }
-                if ($eu.Name) { $result.resolvedName = $eu.Name }
+    $events = $icsText -split 'BEGIN:VEVENT'
+    foreach ($ev in $events) {
+        if (-not $ev.Contains('END:VEVENT')) { continue }
+        $cnMatches = [regex]::Matches($ev, 'ATTENDEE;[^:]*CN=([^:;]+)')
+        if ($cnMatches.Count -lt 2 -or $cnMatches.Count -gt 8) { continue }
+        foreach ($cm in $cnMatches) {
+            $rawName = $cm.Groups[1].Value -replace '\\,', ',' -replace '\\;', ';'
+            $sn = ConvertTo-ShortName $rawName
+            if ($sn -and ($myShortNames -notcontains $sn.ToLower())) {
+                if (-not $contactMap[$sn]) { $contactMap[$sn] = @{ mailFreq = 0; meetFreq = 0; first = $icsDayStr; last = $icsDayStr } }
+                $contactMap[$sn].meetFreq++
+                if ($icsDayStr -lt $contactMap[$sn].first) { $contactMap[$sn].first = $icsDayStr }
+                if ($icsDayStr -gt $contactMap[$sn].last)  { $contactMap[$sn].last  = $icsDayStr }
+                if (-not $fullNameMap[$sn]) { $fullNameMap[$sn] = $rawName }
             }
         }
-    } catch {}
-    $deptCache[$displayName] = $result
-    return $result
+    }
 }
 
 # Merge with existing contacts.json
@@ -273,9 +281,7 @@ foreach ($sn in $contactMap.Keys) {
         $rolle = if ($old.rolle) { $old.rolle } else { '' }
         $oldWeekId = if ($old._weekId) { $old._weekId } else { '' }
         $oldFirst = if ($old.first) { $old.first } else { $c.first }
-        if ($oldWeekId -eq $weekId) {
-            $oldMailFreq = 0; $oldMeetFreq = 0
-        } else {
+        if ($oldWeekId -ne $weekId) {
             $oldMailFreq = if ($old.mailFreq) { $old.mailFreq } else { 0 }
             $oldMeetFreq = if ($old.meetFreq) { $old.meetFreq } else { 0 }
         }
@@ -305,9 +311,12 @@ foreach ($sn in $contactMap.Keys) {
     $handled[$sn] = $true
 }
 
-# Keep existing contacts not seen this week (preserve historical data)
+# Keep existing contacts not seen this week (only if they have correspondence)
 foreach ($old in $existing) {
     if (-not $handled[$old.name]) {
+        $oldMailFreq = if ($old.mailFreq) { $old.mailFreq } else { 0 }
+        $oldMeetFreq = if ($old.meetFreq) { $old.meetFreq } else { 0 }
+        if ($oldMailFreq -eq 0 -and $oldMeetFreq -eq 0) { continue }
         $oldRolle = if ($old.rolle) { $old.rolle } else { '' }
         if (-not $oldRolle -or $oldRolle -eq 'Mitarbeiter') {
             $lookupName = if ($fullNameMap[$old.name]) { $fullNameMap[$old.name] } else { $old.name }
@@ -322,9 +331,9 @@ foreach ($old in $existing) {
             rolle    = $oldRolle
             first    = if ($old.first) { $old.first } else { '' }
             last     = if ($old.last)  { $old.last }  else { '' }
-            mailFreq = if ($old.mailFreq) { $old.mailFreq } else { 0 }
-            meetFreq = if ($old.meetFreq) { $old.meetFreq } else { 0 }
-            freq     = if ($old.freq)  { $old.freq }  else { 0 }
+            mailFreq = $oldMailFreq
+            meetFreq = $oldMeetFreq
+            freq     = $oldMailFreq + $oldMeetFreq
             _weekId  = if ($old._weekId) { $old._weekId } else { '' }
         }
     }

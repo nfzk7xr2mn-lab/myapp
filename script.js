@@ -1,24 +1,40 @@
-// ── Simple / Expert Mode ──────────────────────────────────────────────────
-let expertMode = localStorage.getItem('expertMode') === '1';
+// ── Mode: simple / expert / focus ─────────────────────────────────────────
+let currentMode = localStorage.getItem('dashMode');
+if (!currentMode) {
+  currentMode = localStorage.getItem('expertMode') === '1' ? 'expert' : 'simple';
+  localStorage.setItem('dashMode', currentMode);
+  localStorage.removeItem('expertMode');
+}
 
-function applyMode(expert) {
-  expertMode = expert;
-  localStorage.setItem('expertMode', expert ? '1' : '0');
+const MODE_CYCLE = ['simple', 'expert', 'focus'];
+const MODE_ICONS = { simple: '⊞', expert: '⊟', focus: '⊕' };
+const MODE_LABELS = { simple: 'Expertenmodus (E)', expert: 'Fokusmodus (E)', focus: 'Grundmodus (E)' };
+
+function applyMode(mode) {
+  currentMode = mode;
+  localStorage.setItem('dashMode', mode);
   const phase = currentPhase();
-  document.body.className = phase.css + (expert ? ' mode-expert' : ' mode-simple');
+  document.body.className = phase.css + ' mode-' + mode;
   const btn = document.getElementById('btn-mode-toggle');
-  if (btn) { btn.textContent = expert ? '⊟' : '⊞'; btn.title = expert ? 'Grundmodus (E)' : 'Expertenmodus (E)'; }
-  if (!expert) renderSimpleBar();
+  const nextMode = MODE_CYCLE[(MODE_CYCLE.indexOf(mode) + 1) % MODE_CYCLE.length];
+  if (btn) { btn.textContent = MODE_ICONS[mode]; btn.title = MODE_LABELS[mode]; }
+  const btnExp = document.getElementById('btn-mode-toggle-expert');
+  if (btnExp) { btnExp.textContent = MODE_ICONS[mode]; btnExp.title = MODE_LABELS[mode]; }
+  if (mode === 'simple') {
+    renderSimpleBar();
+  } else {
+    renderAll();
+  }
   try {
     const sw = screen.availWidth;
     const sh = screen.availHeight;
     const barH = 64;
-    if (expert) {
-      window.moveTo(0, 0);
-      window.resizeTo(sw, sh);
-    } else {
+    if (mode === 'simple') {
       window.resizeTo(sw, barH);
       window.moveTo(0, screen.height - barH);
+    } else {
+      window.moveTo(0, 0);
+      window.resizeTo(sw, sh);
     }
   } catch(e) {}
 }
@@ -59,7 +75,7 @@ function renderSimpleBar() {
       return curMin >= s && curMin < en;
     });
     if (!busy) {
-      freeHtml = `<span class="sb-free-tag">🟢 jetzt frei</span>`;
+      freeHtml = `<span class="sb-free-tag">jetzt frei</span>`;
     } else {
       let freeAt = busy.endDate;
       const future = timed.filter(e => {
@@ -72,63 +88,59 @@ function renderSimpleBar() {
         if (gap > 5) break;
         freeAt = fe.endDate;
       }
-      freeHtml = `<span class="sb-free-tag">🟢 frei ab ${fmtTime(freeAt)}</span>`;
+      freeHtml = `<span class="sb-free-tag">frei ab ${fmtTime(freeAt)}</span>`;
     }
 
     if (current && next) {
       const endStr = fmtTime(current.endDate);
       const startStr = fmtTime(next.startDate);
-      calEl.innerHTML = `<span class="sb-line1"><span class="sb-label">📅</span> bis ${endStr} <span class="sb-current">${escapeHtml(current.title)}</span></span><span class="sb-line2">ab ${startStr} <span class="sb-next">${escapeHtml(next.title)}</span>, ${freeHtml}</span>`;
+      calEl.innerHTML = `<span class="sb-line1">bis ${endStr} <span class="sb-current">${escapeHtml(current.title)}</span></span><span class="sb-line2">ab ${startStr} <span class="sb-next">${escapeHtml(next.title)}</span>, ${freeHtml}</span>`;
     } else if (current) {
       const endStr = fmtTime(current.endDate);
-      calEl.innerHTML = `<span class="sb-line1"><span class="sb-label">📅</span> bis ${endStr} <span class="sb-current">${escapeHtml(current.title)}</span></span><span class="sb-line2">${freeHtml}</span>`;
+      calEl.innerHTML = `<span class="sb-line1">bis ${endStr} <span class="sb-current">${escapeHtml(current.title)}</span></span><span class="sb-line2">${freeHtml}</span>`;
     } else if (next) {
       const startStr = fmtTime(next.startDate);
-      calEl.innerHTML = `<span class="sb-line1"><span class="sb-label">📅</span> ab ${startStr} <span class="sb-next">${escapeHtml(next.title)}</span></span><span class="sb-line2">${freeHtml}</span>`;
+      calEl.innerHTML = `<span class="sb-line1">ab ${startStr} <span class="sb-next">${escapeHtml(next.title)}</span></span><span class="sb-line2">${freeHtml}</span>`;
+    } else if (now.getHours() >= 17 && icsTomorrowEvents.length > 0) {
+      const firstTomorrow = icsTomorrowEvents.filter(e => !e.allDay).sort((a, b) => a.startDate - b.startDate)[0];
+      if (firstTomorrow) {
+        const startStr = fmtTime(firstTomorrow.startDate);
+        const dayName = firstTomorrow.startDate.toLocaleDateString('de-DE', { weekday: 'long' });
+        calEl.innerHTML = `<span class="sb-line1">${dayName} ab ${startStr} <span class="sb-next">${escapeHtml(firstTomorrow.title)}</span></span><span class="sb-line2">${freeHtml}</span>`;
+      } else {
+        calEl.innerHTML = '';
+      }
     } else {
-      calEl.innerHTML = `<span class="sb-label">📅</span>${freeHtml}`;
+      calEl.innerHTML = '';
     }
   }
 
-  // Mail: count today + latest
-  const mailEl = document.getElementById('sb-mail');
-  if (mailEl) {
-    const today = todayStr();
-    const todayMails = mailData.filter(m => m.date === today && m.typ !== 'gesendet');
-    const count = todayMails.length;
-    if (count === 0) {
-      mailEl.title = 'Keine Mails heute';
-      mailEl.innerHTML = `<span class="sb-label">✉️</span><span style="color:var(--text-muted)">Keine Mails heute</span>`;
-    } else {
-      const last = todayMails[0];
-      const sender = shortName(last.from);
-      mailEl.title = `${count} Mails heute – ${sender}: ${last.subject}`;
-      mailEl.innerHTML = `<span class="sb-label">✉️</span><span class="sb-count">${count}</span>`;
-    }
-  }
-
-  // Badges: unanswered direct mails + open actions
+  // Badges: einheitliche Kennzahlen
   const badgesEl = document.getElementById('sb-badges');
   if (badgesEl) {
-    const received = mailData.filter(m => m.typ !== 'gesendet');
-    const sent = mailData.filter(m => m.typ === 'gesendet');
-    const directMails = received.filter(m => {
-      const p = mailPrio(m);
-      return p === 'direct' || p === 'chef';
-    });
-    const unanswered = directMails.filter(m => {
-      const fromLower = (m.from || '').toLowerCase();
-      return !sent.some(s => (s.to || '').toLowerCase().includes(fromLower) && s.date >= m.date);
-    });
+    const today = todayStr();
+    const remaining = icsEvents.filter(e => !e.allDay).filter(e =>
+      e.endDate.getHours() * 60 + e.endDate.getMinutes() > curMin
+    ).length;
+    const mailCount = mailData.filter(m => m.date === today && m.typ !== 'gesendet').length;
     const openActions = actionsData.filter(a => !a.done).length;
+    const openJira = jiraData.filter(j => j.status !== 'Done' && j.status !== 'Closed' && j.status !== 'Cancelled' && j.status !== 'Finished').length;
+
     let html = '';
-    if (unanswered.length > 0) html += `<span class="sb-badge sb-badge-mail" title="Direkte Mails ohne Antwort">✉ ${unanswered.length}</span>`;
-    if (openActions > 0) html += `<span class="sb-badge sb-badge-action" title="Offene Actions">⚡ ${openActions}</span>`;
+    if (remaining > 0)   html += `<span class="sb-badge sb-badge-cal" title="${remaining} verbleibende Termine">${remaining}<span class="sb-badge-label">Termine</span></span>`;
+    if (mailCount > 0)   html += `<span class="sb-badge sb-badge-mail" title="${mailCount} Mails heute">${mailCount}<span class="sb-badge-label">Mails</span></span>`;
+    if (openActions > 0) html += `<span class="sb-badge sb-badge-action" title="${openActions} offene Aktionen">${openActions}<span class="sb-badge-label">Aktionen</span></span>`;
+    if (openJira > 0)    html += `<span class="sb-badge sb-badge-jira" title="${openJira} offene Jira-Tickets">${openJira}<span class="sb-badge-label">Jira</span></span>`;
     badgesEl.innerHTML = html;
   }
 }
 
-document.getElementById('btn-mode-toggle').addEventListener('click', () => applyMode(!expertMode));
+function cycleMode() {
+  const next = MODE_CYCLE[(MODE_CYCLE.indexOf(currentMode) + 1) % MODE_CYCLE.length];
+  applyMode(next);
+}
+
+document.getElementById('btn-mode-toggle').addEventListener('click', cycleMode);
 
 document.getElementById('btn-refresh-cal').addEventListener('click', () => {
   const btn = document.getElementById('btn-refresh-cal');
@@ -160,7 +172,7 @@ document.addEventListener('keydown', e => {
   if (e.key === 'e' || e.key === 'E') {
     const tag = document.activeElement && document.activeElement.tagName;
     if (tag === 'INPUT' || tag === 'TEXTAREA') return;
-    applyMode(!expertMode);
+    cycleMode();
   }
 });
 
@@ -184,13 +196,20 @@ let linksData    = [];
 let sportData    = [];
 let notizenData  = [];
 let contactsData = [];
+let quoteData    = null;
+let newsData     = null;
 let icsEvents       = [];
 let icsTomorrowEvents = [];
+let icsLoadedAt     = null;
 let syncFiles     = [];  // from data/sync_files.json
 let aktiverFokusTab   = 'notizen';
 let activeActionsTab  = 'open';
 let learningplanData     = null;
 let learningplanProgress = {};
+let jiraData             = [];
+let jiraToolsetData      = [];
+let goalsData            = null;
+let zieleLastRefresh     = null;
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 function todayStr() {
@@ -201,6 +220,14 @@ function todayStr() {
 function timeToMin(t) {
   const [h, m] = t.split(':').map(Number);
   return h * 60 + m;
+}
+
+function getISOWeek(d) {
+  const tmp = new Date(d.getTime());
+  tmp.setHours(0, 0, 0, 0);
+  tmp.setDate(tmp.getDate() + 3 - ((tmp.getDay() + 6) % 7));
+  const w1 = new Date(tmp.getFullYear(), 0, 4);
+  return 1 + Math.round(((tmp - w1) / 86400000 - 3 + ((w1.getDay() + 6) % 7)) / 7);
 }
 
 function currentPhase() {
@@ -249,15 +276,17 @@ async function loadICSAuto() {
     }
   } catch(e) {}
 
-  const syncModalOpen = document.getElementById('modal-sync').style.display !== 'none';
-  if (!syncModalOpen) renderKalender();
-  if (!expertMode) renderSimpleBar();
+  if (!isAnyModalOpen()) {
+    icsLoadedAt = new Date();
+    renderKalender();
+    if (currentMode === 'simple') renderSimpleBar();
+  }
 }
 
 // ── Load data ──────────────────────────────────────────────────────────────
 async function loadAll() {
   try {
-    const [tRes, aRes, lRes, lnRes, lpRes, lpProg, spRes, nRes, sfRes, ctRes] = await Promise.all([
+    const [tRes, aRes, lRes, lnRes, lpRes, lpProg, spRes, nRes, sfRes, ctRes, qRes, jRes, jtRes, nwRes, jsRes, glRes] = await Promise.all([
       fetch(v('data/termine.txt')),
       fetch(v('data/actions.json')),
       fetch(v('data/learn.txt')),
@@ -268,6 +297,12 @@ async function loadAll() {
       fetch(v('data/notes.json')),
       fetch(v('data/sync_files.json')),
       fetch(v('data/contacts.json')),
+      fetch(v('knowledge/quotes.json')),
+      fetch(v('data/jira.json')),
+      fetch(v('data/jira_toolset.json')),
+      fetch(v('knowledge/news.json')),
+      fetch(v('data/jira_status.json')),
+      fetch(v('knowledge/goals.json')),
     ]);
     if (tRes.ok)   rawTermine       = await tRes.text();
     if (aRes.ok)   actionsData      = await aRes.json();
@@ -279,6 +314,12 @@ async function loadAll() {
     if (nRes.ok)   notizenData      = await nRes.json();
     if (sfRes.ok)  syncFiles        = await sfRes.json();
     if (ctRes.ok)  contactsData     = await ctRes.json();
+    if (qRes.ok)   quoteData        = await qRes.json();
+    if (jRes.ok)   jiraData         = await jRes.json();
+    if (jtRes.ok)  jiraToolsetData  = await jtRes.json();
+    if (nwRes.ok)  newsData         = await nwRes.json();
+    if (jsRes.ok) { const js = await jsRes.json(); if (js.ts) jiraLastSyncTs = js.ts; }
+    if (glRes.ok)  goalsData        = await glRes.json();
   } catch(e) { console.error('Load error', e); }
   await loadICSAuto();
   aktiverFokusTab = defaultFokusTab();
@@ -288,9 +329,10 @@ async function loadAll() {
 
 function defaultFokusTab() {
   const saved = localStorage.getItem('fokusTab');
-  if (saved) return saved;
+  const validTabs = ['notizen', 'wissen', 'links', 'netzwerk', 'jira', 'ziele', 'news'];
+  if (saved && validTabs.includes(saved)) return saved;
   const h = new Date().getHours();
-  if (h < 8)  return 'sport';
+  if (h < 8)  return 'wissen';
   if (h >= 17) return 'wissen';
   return 'notizen';
 }
@@ -303,7 +345,10 @@ function syncFokusTabUI() {
   document.getElementById('btn-add-notiz').style.display     = (aktiverFokusTab === 'notizen')  ? '' : 'none';
   document.getElementById('btn-plan-next-day').style.display = (aktiverFokusTab === 'notizen')  ? '' : 'none';
   document.getElementById('btn-add-contact').style.display   = (aktiverFokusTab === 'netzwerk') ? '' : 'none';
-  const hasBtn = aktiverFokusTab === 'links' || aktiverFokusTab === 'notizen' || aktiverFokusTab === 'netzwerk';
+  document.getElementById('btn-sync-jira').style.display     = (aktiverFokusTab === 'jira')     ? '' : 'none';
+  document.getElementById('btn-refresh-ziele').style.display = (aktiverFokusTab === 'ziele')    ? '' : 'none';
+  document.getElementById('btn-refresh-news').style.display  = (aktiverFokusTab === 'news')     ? '' : 'none';
+  const hasBtn = aktiverFokusTab === 'links' || aktiverFokusTab === 'notizen' || aktiverFokusTab === 'netzwerk' || aktiverFokusTab === 'jira' || aktiverFokusTab === 'news' || aktiverFokusTab === 'ziele';
   document.querySelector('#tile-fokus .tile-footer').classList.toggle('has-button', hasBtn);
   document.getElementById('btn-fokus-placeholder').style.display = hasBtn ? 'none' : '';
 }
@@ -396,8 +441,14 @@ function renderHeader() {
     now.toLocaleDateString('de-DE', { weekday:'long', day:'2-digit', month:'long', year:'numeric' });
   const phase = currentPhase();
   document.getElementById('phase-badge').textContent = phase.label;
-  document.body.className = phase.css + (expertMode ? ' mode-expert' : ' mode-simple');
-  if (!expertMode) renderSimpleBar();
+  document.body.className = phase.css + ' mode-' + currentMode;
+  const quoteEl = document.getElementById('header-quote');
+  if (quoteEl && quoteData && quoteData.text) {
+    const surname = (quoteData.author || '').split(/\s+/).pop();
+    quoteEl.textContent = `„${quoteData.text}“ — ${surname}`;
+    quoteEl.title = `${quoteData.author}, ${quoteData.work || ''}`;
+  }
+  if (currentMode === 'simple') renderSimpleBar();
 }
 
 // ── Render Kalender ────────────────────────────────────────────────────────
@@ -407,7 +458,54 @@ function renderKalender() {
   const calBody = document.getElementById('cal-body');
   const calDate = document.getElementById('cal-date');
 
-  calDate.textContent = now.toLocaleDateString('de-DE', { day:'2-digit', month:'2-digit' });
+  // Focus mode: compact calendar (current + next event only)
+  if (currentMode === 'focus') {
+    calDate.textContent = '';
+    const timed = icsEvents.filter(e => !e.allDay);
+    const current = timed.find(e => {
+      const s = e.startDate.getHours() * 60 + e.startDate.getMinutes();
+      const en = e.endDate.getHours() * 60 + e.endDate.getMinutes();
+      return curMin >= s && curMin <= en;
+    });
+    const next = timed.find(e => {
+      const s = e.startDate.getHours() * 60 + e.startDate.getMinutes();
+      return s > curMin;
+    });
+    let html = '';
+    if (current) {
+      html += `<div class="cal-item cal-current"><span class="cal-dot"></span><span class="cal-time">bis ${fmtTime(current.endDate)}</span><span>${escapeHtml(current.title)}</span></div>`;
+    }
+    if (next) {
+      html += `<div class="cal-item${current ? '' : ' cal-current'}"><span class="cal-dot"></span><span class="cal-time">ab ${fmtTime(next.startDate)}</span><span>${escapeHtml(next.title)}</span></div>`;
+    }
+    if (!current && !next) {
+      if (now.getHours() >= 17 && icsTomorrowEvents.length > 0) {
+        const firstTom = icsTomorrowEvents.filter(e => !e.allDay).sort((a, b) => a.startDate - b.startDate)[0];
+        if (firstTom) {
+          const dayName = firstTom.startDate.toLocaleDateString('de-DE', { weekday: 'long' });
+          html = `<div class="cal-item"><span class="cal-dot"></span><span class="cal-time">${dayName} ab ${fmtTime(firstTom.startDate)}</span><span>${escapeHtml(firstTom.title)}</span></div>`;
+        }
+      }
+      if (!html) html = '<div style="color:var(--text-muted);font-size:0.72rem;padding:4px 0">Keine Termine</div>';
+    }
+    calBody.innerHTML = html;
+    return;
+  }
+
+  const calDateStr = now.toLocaleDateString('de-DE', { day:'2-digit', month:'2-digit' });
+  const calTimeStr = icsLoadedAt ? icsLoadedAt.toLocaleTimeString('de-DE', { hour:'2-digit', minute:'2-digit' }) : '';
+  const t0600 = new Date(now); t0600.setHours(6, 0, 0, 0);
+  const t1200 = new Date(now); t1200.setHours(12, 0, 0, 0);
+  let nextCal;
+  if (now < t0600)      nextCal = t0600;
+  else if (now < t1200) nextCal = t1200;
+  else { nextCal = new Date(t0600); nextCal.setDate(nextCal.getDate() + 1); }
+  const todayDateStr = now.toLocaleDateString('de-DE', { day:'2-digit', month:'2-digit' });
+  const isNextCalToday = nextCal.toLocaleDateString('de-DE', { day:'2-digit', month:'2-digit' }) === todayDateStr;
+  const nextCalDay = nextCal.toLocaleDateString('de-DE', { weekday: 'short' });
+  const nextCalTime = nextCal.toLocaleTimeString('de-DE', { hour:'2-digit', minute:'2-digit' });
+  const nextCalStr = isNextCalToday ? nextCalTime : nextCalDay + ' ' + nextCalTime;
+  calDate.textContent = (calTimeStr ? calDateStr + ' ' + calTimeStr : calDateStr) + ' · ⟳ ' + nextCalStr;
 
   // Use ICS events if available, otherwise fall back to rawTermine
   if (icsEvents.length > 0) {
@@ -417,7 +515,7 @@ function renderKalender() {
         return nameParts.some(p => new RegExp('\\b' + p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\b', 'i').test(e.title));
       });
       const syncLink = syncMatch
-        ? ` <span class="cal-sync-link" onclick="openSyncModal('${syncMatch.file}','${syncMatch.name}')">📋</span>`
+        ? ` <span class="cal-sync-link" data-syncfile="${escapeHtml(syncMatch.file)}" data-syncname="${escapeHtml(syncMatch.name)}">&#x1F4CB;</span>`
         : '';
       const badges = (e.tentative ? ' <span class="cal-badge cal-badge-tent" title="Tentativ">?</span>' : '')
                    + (e.optional  ? ' <span class="cal-badge cal-badge-opt"  title="Optional">opt</span>' : '');
@@ -425,7 +523,7 @@ function renderKalender() {
         return `<div class="cal-item cal-allday-item${extraCls ? ' ' + extraCls : ''}">
           <span class="cal-dot"></span>
           <span class="cal-time" style="font-style:italic">Ganztag</span>
-          <span>${e.title}${badges}${syncLink}</span>
+          <span>${escapeHtml(e.title)}${badges}${syncLink}</span>
         </div>`;
       }
       const startMin = e.startDate.getHours() * 60 + e.startDate.getMinutes();
@@ -439,7 +537,7 @@ function renderKalender() {
       return `<div class="${cls}">
         <span class="cal-dot"></span>
         <span class="cal-time">${fmtTime(e.startDate)}–${fmtTime(e.endDate)}</span>
-        <span>${e.title}${badges}${syncLink}</span>
+        <span>${escapeHtml(e.title)}${badges}${syncLink}</span>
       </div>`;
     };
 
@@ -447,6 +545,9 @@ function renderKalender() {
     const allDay  = icsEvents.filter(e => e.allDay);
     const timed   = icsEvents.filter(e => !e.allDay);
     calBody.innerHTML = [...allDay, ...timed].map(e => renderEvent(e)).join('');
+    calBody.querySelectorAll('.cal-sync-link').forEach(el => {
+      el.addEventListener('click', ev => { ev.stopPropagation(); openSyncModal(el.dataset.syncfile, el.dataset.syncname); });
+    });
 
     if (now.getHours() >= 17 && icsTomorrowEvents.length > 0) {
       const tomorrow = new Date(now); tomorrow.setDate(tomorrow.getDate() + 1);
@@ -455,6 +556,9 @@ function renderKalender() {
       const timedTom  = icsTomorrowEvents.filter(e => !e.allDay);
       calBody.innerHTML += `<div class="cal-tomorrow-header">${tomorrowLabel}</div>`
         + [...allDayTom, ...timedTom].map(e => renderEvent(e, 'cal-tomorrow')).join('');
+      calBody.querySelectorAll('.cal-sync-link').forEach(el => {
+        if (!el._bound) { el._bound = true; el.addEventListener('click', ev => { ev.stopPropagation(); openSyncModal(el.dataset.syncfile, el.dataset.syncname); }); }
+      });
     }
     return;
   }
@@ -497,8 +601,11 @@ function switchFokusTab(tab) {
   document.getElementById('btn-add-notiz').style.display   = (tab === 'notizen') ? '' : 'none';
   document.getElementById('btn-plan-next-day').style.display = (tab === 'notizen') ? '' : 'none';
   document.getElementById('btn-add-contact').style.display = (tab === 'netzwerk') ? '' : 'none';
-  const hasBtn = tab === 'links' || tab === 'notizen' || tab === 'netzwerk';
+  document.getElementById('btn-sync-jira').style.display   = (tab === 'jira')     ? '' : 'none';
+  document.getElementById('btn-refresh-news').style.display = (tab === 'news')     ? '' : 'none';
+  const hasBtn = tab === 'links' || tab === 'notizen' || tab === 'netzwerk' || tab === 'jira' || tab === 'news';
   document.querySelector('#tile-fokus .tile-footer').classList.toggle('has-button', hasBtn);
+  renderFokus();
   renderFokus();
 }
 
@@ -526,39 +633,328 @@ function renderFokus() {
   }
 
   if (aktiverFokusTab === 'wissen') {
-    fokusKat.textContent = 'Hörbücher';
+    fokusKat.textContent = '';
     renderWissen(fokusBody);
     return;
   }
 
-  if (aktiverFokusTab === 'sport') {
-    fokusKat.textContent = 'Bewegung';
-    renderSportLinks(fokusBody);
+  if (aktiverFokusTab === 'jira') {
+    const openCount = jiraData.filter(j => j.status !== 'Done' && j.status !== 'Closed').length;
+    fokusKat.textContent = openCount ? openCount + ' offen' : '';
+    renderJira(fokusBody);
     return;
   }
 
-  // fuehrung + tech: flat learningplan lists
-  if (learningplanData && learningplanData.weeks) {
-    const isFuehrung = aktiverFokusTab === 'fuehrung';
-    fokusKat.textContent = isFuehrung ? 'Führung & People' : 'Tech & Engineering';
-    renderLernplanFlat(fokusBody, isFuehrung);
+  if (aktiverFokusTab === 'news') {
+    fokusKat.textContent = newsData && newsData.items ? newsData.items.length + ' Neues' : '';
+    renderNews(fokusBody);
     return;
   }
 
-  fokusBody.innerHTML = '<div style="color:var(--text-muted);font-size:0.75rem;padding:8px 0">Lernplan nicht geladen</div>';
+  if (aktiverFokusTab === 'ziele') {
+    fokusKat.textContent = goalsData ? goalsData.goals.length + ' Ziele' : '';
+    renderZiele(fokusBody);
+    return;
+  }
+
+  fokusBody.innerHTML = '';
 }
 
-function renderSportLinks(container) {
-  if (!sportData.length) {
-    container.innerHTML = '<div style="color:var(--text-muted);font-size:0.75rem;padding:8px 0">Keine Sportlinks vorhanden</div>';
+
+// ── Render Jira ─────────────────────────────────────────────────────────
+function renderJiraItem(j) {
+  const st = (j.status || '').toLowerCase();
+  const statusClass = st.includes('progress') || st.includes('review') || st === 'running' ? 'jira-status-progress'
+                    : st === 'done' || st === 'closed' ? 'jira-status-done'
+                    : st === 'blocked' ? 'jira-status-blocked'
+                    : st === 'on hold' ? 'jira-status-hold'
+                    : 'jira-status-todo';
+  const shortKey = j.key.replace('CLMSLORCHESTRATOR', 'SLOCON').replace(/CLMSLCCI4ABAP/, 'CLOUDLM');
+  return '<a class="jira-pill ' + statusClass + '" href="' + safeHref(j.url) + '" title="' + escapeHtml(j.summary) + ' [' + escapeHtml(j.status) + ']" onclick="openExternal(this.href);return false;">' + escapeHtml(shortKey) + '</a>';
+}
+
+function renderJiraToolsetItem(j) {
+  const cat = j.category || '';
+  const num = (j.key || '').replace(/^[A-Z]+-/, '');
+  const label = cat ? cat + '-' + num : j.key;
+  const st = (j.status || '').toLowerCase();
+  const statusClass = st.includes('progress') || st.includes('review') || st === 'running' ? 'jira-status-progress'
+                    : st === 'done' || st === 'closed' ? 'jira-status-done'
+                    : st === 'blocked' ? 'jira-status-blocked'
+                    : st === 'on hold' ? 'jira-status-hold'
+                    : 'jira-status-todo';
+  return '<a class="jira-pill ' + statusClass + '" href="' + safeHref(j.url) + '" title="' + escapeHtml(j.summary) + ' [' + escapeHtml(j.status) + ']" onclick="openExternal(this.href);return false;">' + escapeHtml(label) + '</a>';
+}
+
+function renderJira(container) {
+  if (!jiraData.length) {
+    container.innerHTML = '<div style="color:var(--text-muted);font-size:0.75rem;padding:8px 0">Keine Jira-Items geladen.</div>';
     return;
   }
-  container.innerHTML = sportData.map(item =>
-    `<div class="learn-item">
-      <span class="learn-kat" title="${item.category}">${item.category.split(' ')[0]}</span>
-      <a class="learn-link" href="${item.url}" target="_blank">${item.title}${item.creator ? ' <em style="color:var(--text-muted)">– ' + item.creator + '</em>' : ''}</a>
-    </div>`
-  ).join('');
+  const statusOrder = { 'In Progress': 0, 'Running': 0, 'In Review': 1, 'On Hold': 2, 'Blocked': 2, 'To Do': 3, 'Open': 3, 'Planned': 4, 'Reopened': 3 };
+  const sortItems = (items) => [...items].sort((a, b) => {
+    const sa = statusOrder[a.status] !== undefined ? statusOrder[a.status] : 5;
+    const sb = statusOrder[b.status] !== undefined ? statusOrder[b.status] : 5;
+    if (sa !== sb) return sa - sb;
+    return (b.updated || '').localeCompare(a.updated || '');
+  });
+  const open = jiraData.filter(j => j.status !== 'Done' && j.status !== 'Closed' && j.status !== 'Cancelled' && j.status !== 'Finished');
+  if (!open.length) {
+    container.innerHTML = '<div style="color:var(--text-muted);font-size:0.75rem;padding:8px 0">Alle Items erledigt.</div>';
+    return;
+  }
+  const myItems = sortItems(open.filter(j => !j.releases || !j.releases.length));
+  const toolsetItems = open.filter(j => j.releases && j.releases.length);
+
+  let html = jiraSetupHint ? '<div class="jira-setup-hint">' + escapeHtml(jiraSetupHint) + '</div>' : '';
+
+  if (myItems.length) {
+    const myGroups = {};
+    myItems.forEach(j => {
+      const p = j.project || 'Sonstige';
+      if (!myGroups[p]) myGroups[p] = [];
+      myGroups[p].push(j);
+    });
+    const myKeys = Object.keys(myGroups).sort();
+    html += '<details class="jira-tree-root" open>'
+      + '<summary class="jira-tree-summary-root">Meine <span class="jira-tree-count">(' + myItems.length + ')</span></summary>'
+      + myKeys.map(p =>
+          '<div class="jira-cat-group">'
+          + '<span class="jira-cat-label">' + escapeHtml(p.replace('CLMSLORCHESTRATOR', 'SLOCON').replace(/CLMSLCCI4ABAP/, 'CLOUDLM')) + '</span>'
+          + '<span class="jira-pill-wrap">' + myGroups[p].map(renderJiraItem).join('') + '</span>'
+          + '</div>'
+        ).join('')
+      + '</details>';
+  }
+
+  if (toolsetItems.length) {
+    const releaseMap = {};
+    toolsetItems.forEach(j => {
+      j.releases.forEach(rel => {
+        if (!releaseMap[rel]) releaseMap[rel] = [];
+        releaseMap[rel].push(j);
+      });
+    });
+    const releaseKeys = Object.keys(releaseMap).sort((a, b) => b.localeCompare(a));
+    const uniqueCount = toolsetItems.length;
+    const catOrder = { 'REGR': 0, 'RAMP': 1, 'SLV': 2 };
+    html += '<details class="jira-tree-root">'
+      + '<summary class="jira-tree-summary-root">SL Toolset for Cloud <span class="jira-tree-count">(' + uniqueCount + ')</span></summary>'
+      + releaseKeys.map(rel => {
+          const items = sortItems(releaseMap[rel]);
+          const catGroups = {};
+          items.forEach(j => {
+            const cat = j.category || 'Sonstige';
+            if (!catGroups[cat]) catGroups[cat] = [];
+            catGroups[cat].push(j);
+          });
+          const catKeys = Object.keys(catGroups).sort((a, b) => ((catOrder[a] ?? 9) - (catOrder[b] ?? 9)));
+          return '<details class="jira-tree-project" open>'
+            + '<summary class="jira-tree-summary-project">Release ' + escapeHtml(rel) + ' <span class="jira-tree-count">(' + items.length + ')</span></summary>'
+            + catKeys.map(cat =>
+                '<div class="jira-cat-group">'
+                + '<span class="jira-cat-label">' + escapeHtml(cat) + '</span>'
+                + '<span class="jira-pill-wrap">' + catGroups[cat].map(renderJiraToolsetItem).join('') + '</span>'
+                + '</div>'
+              ).join('')
+            + '</details>';
+        }).join('')
+      + '</details>';
+  }
+
+  if (jiraLastSyncTs) {
+    const d = new Date(jiraLastSyncTs);
+    const syncTime = d.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Berlin' });
+    const syncDate = d.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', timeZone: 'Europe/Berlin' });
+    html += '<div class="news-meta">Sync ' + syncDate + ' ' + syncTime + '</div>';
+  }
+  container.innerHTML = html;
+}
+
+function openExternal(url) {
+  fetch(WRITE_SERVER + '/open-url', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({url:url}) }).catch(() => {
+    window.open(url, '_blank');
+  });
+}
+let jiraSetupMode = false;
+let jiraSetupHint = '';
+let jiraLastSyncTs = 0;
+
+async function pollJiraStatus(maxMs, intervalMs) {
+  const deadline = Date.now() + maxMs;
+  while (Date.now() < deadline) {
+    await new Promise(r => setTimeout(r, intervalMs));
+    try {
+      const res = await fetch(v('data/jira_status.json'));
+      if (res.ok) return await res.json();
+    } catch(e) {}
+  }
+  return null;
+}
+
+function updateJiraButton(text, enabled) {
+  const btn = document.getElementById('btn-sync-jira');
+  if (!btn) return;
+  btn.innerHTML = text;
+  btn.disabled = !enabled;
+  btn.style.opacity = enabled ? '' : '0.5';
+}
+
+async function syncJira() {
+  if (jiraSyncing) return;
+  jiraSyncing = true;
+  updateJiraButton('Sync...', false);
+  try {
+    await fetch(WRITE_SERVER + '/run-sync-jira', { method: 'POST' });
+    const status = await pollJiraStatus(30000, 3000);
+    if (status && status.status === 'ok') {
+      const [res, jtRes] = await Promise.all([fetch(v('data/jira.json')), fetch(v('data/jira_toolset.json'))]);
+      if (res.ok) jiraData = await res.json();
+      if (jtRes.ok) jiraToolsetData = await jtRes.json();
+      jiraSetupMode = false;
+      jiraSetupHint = '';
+      jiraLastSyncTs = status.ts || Date.now();
+      updateJiraButton('&#x21BB; Sync', true);
+    } else {
+      jiraSetupMode = true;
+      jiraSetupHint = 'Jira-Verbindung abgelaufen. Klicke "Setup" im Footer.';
+      updateJiraButton('&#x26A1; Setup', true);
+    }
+  } catch(e) {
+    jiraSetupMode = true;
+    jiraSetupHint = 'Jira-Sync fehlgeschlagen.';
+    updateJiraButton('&#x26A1; Setup', true);
+  }
+  jiraSyncing = false;
+  if (aktiverFokusTab === 'jira') renderFokus();
+}
+
+async function setupJira() {
+  if (jiraSyncing) return;
+  jiraSyncing = true;
+  updateJiraButton('Login...', false);
+  jiraSetupHint = '';
+  try {
+    await fetch(WRITE_SERVER + '/run-setup-jira', { method: 'POST' });
+    const deadline = Date.now() + 200000;
+    let status = null;
+    while (Date.now() < deadline) {
+      await new Promise(r => setTimeout(r, 5000));
+      try {
+        const res = await fetch(v('data/jira_status.json'));
+        if (res.ok) status = await res.json();
+      } catch(e) { continue; }
+      if (!status) continue;
+      if (status.status === 'login_required') {
+        jiraSetupHint = 'Bitte im Browser einloggen (SAP SSO)...';
+        if (aktiverFokusTab === 'jira') renderFokus();
+        continue;
+      }
+      if (status.status === 'ok') break;
+      if (status.status === 'error' || status.status === 'timeout') break;
+    }
+    if (status && status.status === 'ok') {
+      const [res, jtRes] = await Promise.all([fetch(v('data/jira.json')), fetch(v('data/jira_toolset.json'))]);
+      if (res.ok) jiraData = await res.json();
+      if (jtRes.ok) jiraToolsetData = await jtRes.json();
+      jiraSetupMode = false;
+      jiraSetupHint = '';
+      jiraLastSyncTs = status.ts || Date.now();
+      updateJiraButton('&#x21BB; Sync', true);
+    } else {
+      jiraSetupHint = status && status.message ? status.message : 'Setup fehlgeschlagen oder Timeout.';
+      updateJiraButton('&#x26A1; Setup', true);
+    }
+  } catch(e) {
+    jiraSetupHint = 'Setup-Fehler.';
+    updateJiraButton('&#x26A1; Setup', true);
+  }
+  jiraSyncing = false;
+  if (aktiverFokusTab === 'jira') renderFokus();
+}
+
+function handleJiraButton() {
+  if (jiraSetupMode) setupJira();
+  else syncJira();
+}
+
+function renderNews(container) {
+  if (!newsData || !newsData.items || !newsData.items.length) {
+    container.innerHTML = '<div style="color:var(--text-muted);font-size:0.75rem;padding:8px 0">Kein Neues geladen. Klicke Aktualisieren im Footer.</div>';
+    return;
+  }
+  let metaLabel = '';
+  if (newsData.ts) {
+    const d = new Date(newsData.ts);
+    const time = d.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Berlin' });
+    const date = d.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', timeZone: 'Europe/Berlin' });
+    metaLabel = date + ' ' + time;
+  }
+  container.innerHTML =
+    '<div class="news-source">squirrel-news.net</div>' +
+    newsData.items.map(item =>
+      `<div class="news-item">${escapeHtml(item)}</div>`
+    ).join('') +
+    (metaLabel ? `<div class="news-meta">${metaLabel}</div>` : '');
+}
+
+// ── Render Ziele ────────────────────────────────────────────────────────────
+function renderZiele(container) {
+  if (!goalsData || !goalsData.goals || !goalsData.goals.length) {
+    container.innerHTML = '<div style="color:var(--text-muted);font-size:0.75rem;padding:8px 0">Keine Ziele geladen.</div>';
+    return;
+  }
+  const mails = Array.isArray(mailData) ? mailData : [];
+  let totalMatched = 0;
+
+  const goalsHtml = goalsData.goals.map(goal => {
+    const kws = (goal.keywords || []).map(k => k.toLowerCase());
+    const matched = [];
+    mails.forEach(m => {
+      const subj = (m.subject || m.betreff || '').toLowerCase();
+      const hits = kws.filter(k => subj.includes(k));
+      if (hits.length) matched.push({ mail: m, keywords: hits });
+    });
+    totalMatched += matched.length;
+    const countBadge = matched.length
+      ? `<span class="ziele-mail-count">${matched.length} Mail${matched.length !== 1 ? 's' : ''}</span>`
+      : '<span class="ziele-mail-count ziele-no-mails">0 Mails</span>';
+    const mailList = matched.length
+      ? matched.slice(0, 15).map(({ mail: m, keywords: hits }) => {
+          const d = m.date || m.datum || '';
+          const prio = mailPrio(m);
+          const pm = PRIO_META[prio] || PRIO_META.fyi;
+          const subj = m.subject || m.betreff || '';
+          const body = m.body || '';
+          const from = m.typ === 'gesendet' ? '→ gesendet' : shortName(m.from || '');
+          const kwBadges = hits.map(k => `<span class="ziele-kw">${escapeHtml(k)}</span>`).join('');
+          return `<div class="ziele-mail"><div class="ziele-mail-row"><span class="mail-prio ${pm.cls}" title="${pm.title}">${pm.label}</span><span class="ziele-mail-date">${escapeHtml(d)}</span><span class="ziele-mail-from">${escapeHtml(from)}</span><span class="ziele-mail-subj">${escapeHtml(subj)}</span>${kwBadges}</div><div class="ziele-mail-body" style="display:none">${escapeHtml(body)}</div></div>`;
+        }).join('') + (matched.length > 15 ? `<div class="ziele-mail ziele-more">+ ${matched.length - 15} weitere</div>` : '')
+      : '<div class="ziele-no-match">Keine Mails diese Woche</div>';
+    return `<details class="ziele-goal" open>
+      <summary class="ziele-goal-header">
+        <span class="ziele-weight">${goal.weight}%</span>
+        <span class="ziele-title">${escapeHtml(goal.title)}</span>
+        ${countBadge}
+      </summary>
+      <div class="ziele-mail-list">${mailList}</div>
+    </details>`;
+  }).join('');
+
+  const weekLabel = 'KW ' + getISOWeek(new Date());
+  if (!zieleLastRefresh) zieleLastRefresh = new Date();
+  const lastStr = zieleLastRefresh.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' });
+  container.innerHTML =
+    `<div class="ziele-header">${escapeHtml(goalsData.year + '')} &middot; ${weekLabel} &middot; ${totalMatched} Mail-Bezuege</div>`
+    + `<div class="ziele-meta">Stand: ${lastStr}</div>`
+    + goalsHtml;
+  container.querySelectorAll('.ziele-mail').forEach(el => {
+    const body = el.querySelector('.ziele-mail-body');
+    if (body) el.style.cursor = 'pointer';
+    if (body) el.addEventListener('click', () => {
+      body.style.display = body.style.display === 'none' ? '' : 'none';
+    });
+  });
 }
 
 function renderNetzwerk(container) {
@@ -570,14 +966,25 @@ function renderNetzwerk(container) {
   const searchVal = searchEl ? searchEl.value : '';
   const cursorPos = searchEl ? searchEl.selectionStart : 0;
   const sortMode = localStorage.getItem('nwSort') || 'freq';
-  const sorted = [...contactsData].sort((a, b) => {
-    if (sortMode === 'alpha') return (a.name || '').localeCompare(b.name || '', 'de');
-    if (sortMode === 'dept') {
-      const da = (a.rolle || '').toLowerCase(), db = (b.rolle || '').toLowerCase();
-      return da.localeCompare(db, 'de') || (b.freq || 0) - (a.freq || 0);
-    }
-    return (b.freq || 0) - (a.freq || 0);
-  });
+  const topN = [...contactsData].sort((a, b) => (b.freq || 0) - (a.freq || 0)).slice(0, 20);
+  const innerSet = new Set(topN.map(c => c.name));
+  let sorted;
+  if (sortMode === 'freq') {
+    sorted = topN;
+  } else {
+    sorted = [...contactsData].sort((a, b) => {
+      if (sortMode === 'alpha') return (a.name || '').localeCompare(b.name || '', 'de');
+      if (sortMode === 'dept') {
+        const ra = (a.rolle || ''), rb = (b.rolle || '');
+        const da = ra.includes(',') ? ra.split(',')[0].trim() : ra;
+        const db = rb.includes(',') ? rb.split(',')[0].trim() : rb;
+        if (!da && db) return 1;
+        if (da && !db) return -1;
+        return da.localeCompare(db, 'de') || (a.name || '').localeCompare(b.name || '', 'de');
+      }
+      return (b.freq || 0) - (a.freq || 0);
+    });
+  }
   const q = searchVal.toLowerCase();
   const filtered = q ? sorted.filter(c =>
     (c.name || '').toLowerCase().includes(q) ||
@@ -585,28 +992,49 @@ function renderNetzwerk(container) {
   ) : sorted;
   const searchBar = `<input class="nw-search" id="nw-search" placeholder="Suche..." value="${escapeHtml(searchVal)}" oninput="renderFokus()" />`;
   const toggleBar = `<div class="nw-sort-bar">
-    <button class="nw-sort-btn${sortMode === 'freq' ? ' nw-sort-active' : ''}" onclick="setNwSort('freq')">Haeufigkeit</button>
+    <button class="nw-sort-btn${sortMode === 'freq' ? ' nw-sort-active' : ''}" onclick="setNwSort('freq')">Oft</button>
     <button class="nw-sort-btn${sortMode === 'alpha' ? ' nw-sort-active' : ''}" onclick="setNwSort('alpha')">A-Z</button>
     <button class="nw-sort-btn${sortMode === 'dept' ? ' nw-sort-active' : ''}" onclick="setNwSort('dept')">Abteilung</button>
   </div>`;
-  container.innerHTML = searchBar + toggleBar + filtered.map((c) => {
+  const renderItem = (c) => {
     const origIdx = contactsData.indexOf(c);
     const rolle = c.rolle
       ? `<div class="nw-rolle">${escapeHtml(c.rolle)}</div>`
       : `<div class="nw-rolle nw-rolle-empty">Rolle / Notiz...</div>`;
     const dates = c.first && c.last && c.first !== c.last
       ? `${c.first} – ${c.last}` : (c.last || c.first || '');
-    return `<div class="nw-item" onclick="editNetzwerk(${origIdx})">
+    const isInner = innerSet.has(c.name);
+    const marker = isInner ? '<span class="nw-inner" title="Inner Circle">&#x2726;</span>' : '';
+    return `<div class="nw-item${isInner ? ' nw-inner-row' : ''}" onclick="editNetzwerk(${origIdx})">
       <div class="nw-left">
-        <div class="nw-name">${escapeHtml(c.name)}</div>
-        ${rolle}
+        <div class="nw-name">${marker}${escapeHtml(c.name)}</div>
+        ${sortMode === 'alpha' ? rolle : ''}
       </div>
       <div class="nw-right">
-        <div class="nw-freq">${c.freq || 0}</div>
         <div class="nw-dates">${dates}</div>
       </div>
     </div>`;
-  }).join('');
+  };
+  if (sortMode === 'dept' || sortMode === 'freq') {
+    const groups = {};
+    filtered.forEach(c => {
+      const raw = c.rolle || '';
+      const dept = raw.includes(',') ? raw.split(',')[0].trim() : raw;
+      (groups[dept] = groups[dept] || []).push(c);
+    });
+    const deptKeys = Object.keys(groups).filter(d => d).sort((a, b) => a.localeCompare(b, 'de'));
+    if (groups['']) deptKeys.push('');
+    container.innerHTML = searchBar + toggleBar + deptKeys.map(dept => {
+      const members = groups[dept].sort((a, b) => (a.name || '').localeCompare(b.name || '', 'de'));
+      const label = dept || 'Ohne Abteilung';
+      return `<details class="nw-dept-group">
+        <summary>${escapeHtml(label)} <span class="nw-dept-count">(${members.length})</span></summary>
+        ${members.map(renderItem).join('')}
+      </details>`;
+    }).join('');
+  } else {
+    container.innerHTML = searchBar + toggleBar + filtered.map(renderItem).join('');
+  }
   const newSearch = document.getElementById('nw-search');
   if (newSearch && searchVal) {
     newSearch.focus();
@@ -683,33 +1111,21 @@ async function addContact(name, rolle) {
   } catch(e) { console.error('addContact error:', e); }
 }
 
-function renderLernplanFlat(container, isFuehrung) {
-  const allDays = learningplanData.weeks.flatMap(w => w.days);
-  const filtered = allDays.filter(d => {
-    const topics = (d.topics || []).map(t => t.toLowerCase());
-    const hasFuehrung = topics.some(t => FUEHRUNG_TOPICS.has(t));
-    return isFuehrung ? hasFuehrung : !hasFuehrung;
-  });
-  const total = filtered.length;
-  const done  = filtered.filter(d => learningplanProgress[d.day]).length;
-  let html = `<div class="learningplan-header">
-    <span class="learningplan-title">${isFuehrung ? '👥' : '⚙️'} ${total} Themen</span>
-    <span class="learningplan-total">${done}/${total}</span>
-  </div>`;
-  html += filtered.map(day => {
-    const isDone = !!learningplanProgress[day.day];
-    return `<div class="learningplan-day${isDone ? ' learningplan-done' : ''}">
-      <input type="checkbox" class="learningplan-cb" id="lp-${day.day}"
-        ${isDone ? 'checked' : ''} onchange="toggleLernplanDay(${day.day}, this.checked)">
-      <label for="lp-${day.day}">
-        <a href="${escapeHtml(day.url)}" target="_blank">
-          ${escapeHtml(day.title)} <span class="learningplan-creator">(${escapeHtml(day.creator)})</span>
-        </a>
-      </label>
-    </div>`;
-  }).join('');
-  container.innerHTML = html;
+async function deleteContact(name) {
+  try {
+    const res = await fetch(v('data/contacts.json'));
+    if (!res.ok) return;
+    const fresh = await res.json();
+    const filtered = fresh.filter(c => c.name !== name);
+    await fetch(`${WRITE_SERVER}/contacts.json`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json; charset=utf-8' },
+      body: JSON.stringify(filtered, null, 2),
+    });
+    contactsData = filtered;
+  } catch(e) { console.error('deleteContact error:', e); }
 }
+
 
 function renderLinks(container) {
   if (!linksData.length) {
@@ -718,13 +1134,12 @@ function renderLinks(container) {
   }
   container.innerHTML = linksData.map((l, idx) =>
     `<div class="learn-item">
-      <a class="learn-link" href="${escapeHtml(l.url)}" target="_blank" title="${escapeHtml(l.url)}">${escapeHtml(l.label)}</a>
+      <a class="learn-link" href="${safeHref(l.url)}" target="_blank" title="${escapeHtml(l.url)}">${escapeHtml(l.label)}</a>
       <button class="btn-x" title="Löschen" onclick="deleteLink(${idx})">✕</button>
     </div>`
   ).join('');
 }
 
-function renderLernplan() {} // unused, kept for safety
 
 function renderWissen(container) {
   Promise.allSettled([
@@ -757,6 +1172,34 @@ function renderWissen(container) {
       `<div class="wissen-section-header">${label}</div>`;
 
     let html = '';
+
+    // Sport section
+    if (sportData.length) {
+      html += sectionHeader('🏃 Sport');
+      html += sportData.map(item =>
+        `<div class="learn-item">
+          <span class="learn-kat" title="${escapeHtml(item.category)}">${escapeHtml(item.category.split(' ')[0])}</span>
+          <a class="learn-link" href="${safeHref(item.url)}" target="_blank">${escapeHtml(item.title)}${item.creator ? ' <em style="color:var(--text-muted)">– ' + escapeHtml(item.creator) + '</em>' : ''}</a>
+        </div>`
+      ).join('');
+    }
+
+    // Lernplan sections (Führung + Tech)
+    if (learningplanData && learningplanData.weeks) {
+      const allDays = learningplanData.weeks.flatMap(w => w.days);
+      const fuehrungDays = allDays.filter(d => (d.topics || []).some(t => FUEHRUNG_TOPICS.has(t.toLowerCase())));
+      const techDays = allDays.filter(d => !(d.topics || []).some(t => FUEHRUNG_TOPICS.has(t.toLowerCase())));
+      if (fuehrungDays.length) {
+        html += sectionHeader('👥 Führung & People');
+        html += renderLernplanSection(fuehrungDays);
+      }
+      if (techDays.length) {
+        html += sectionHeader('⚙️ Tech & Engineering');
+        html += renderLernplanSection(techDays);
+      }
+    }
+
+    // Hörbücher
     if (audiobooksRes.status === 'fulfilled') {
       html += sectionHeader('📖 Hörbücher');
       html += renderBuecher(audiobooksRes.value, '📖');
@@ -771,6 +1214,27 @@ function renderWissen(container) {
     }
     container.innerHTML = html || '<div style="color:var(--text-muted);font-size:0.75rem;padding:8px 0">Keine Inhalte geladen</div>';
   });
+}
+
+function renderLernplanSection(days) {
+  const total = days.length;
+  const done  = days.filter(d => learningplanProgress[d.day]).length;
+  let html = `<div class="learningplan-header">
+    <span class="learningplan-total">${done}/${total}</span>
+  </div>`;
+  html += days.map(day => {
+    const isDone = !!learningplanProgress[day.day];
+    return `<div class="learningplan-day${isDone ? ' learningplan-done' : ''}">
+      <input type="checkbox" class="learningplan-cb" id="lp-${day.day}"
+        ${isDone ? 'checked' : ''} onchange="toggleLernplanDay(${day.day}, this.checked)">
+      <label for="lp-${day.day}">
+        <a href="${safeHref(day.url)}" target="_blank">
+          ${escapeHtml(day.title)} <span class="learningplan-creator">(${escapeHtml(day.creator)})</span>
+        </a>
+      </label>
+    </div>`;
+  }).join('');
+  return html;
 }
 
 function formatNotizText(text) {
@@ -800,18 +1264,58 @@ function renderNotizen(container) {
     return;
   }
   const openSet = new Set(
-    [...container.querySelectorAll('details.notiz-item')].filter(el => el.open).map(el => el.dataset.titel)
+    [...container.querySelectorAll('details.notiz-item, details.notiz-group')].filter(el => el.open).map(el => el.dataset.titel)
   );
-  container.innerHTML = notizenData.map((n, idx) => {
+  const planRe = /^Planung (KW\d+)-(MO|DI|MI|DO|FR)$/;
+  const planGroups = {};
+  const items = [];
+  notizenData.forEach((n, idx) => {
+    const m = n.titel.match(planRe);
+    if (m) {
+      const kw = m[1];
+      if (!planGroups[kw]) planGroups[kw] = { entries: [], firstIdx: idx };
+      planGroups[kw].entries.push({ n, idx, day: m[2] });
+    } else {
+      items.push({ type: 'note', n, idx });
+    }
+  });
+  const dayOrder = { MO: 0, DI: 1, MI: 2, DO: 3, FR: 4 };
+  Object.keys(planGroups).forEach(kw => {
+    const g = planGroups[kw];
+    g.entries.sort((a, b) => dayOrder[a.day] - dayOrder[b.day]);
+    items.push({ type: 'plan', kw, entries: g.entries, firstIdx: g.firstIdx });
+  });
+  items.sort((a, b) => {
+    const ai = a.type === 'note' ? a.idx : a.firstIdx;
+    const bi = b.type === 'note' ? b.idx : b.firstIdx;
+    return ai - bi;
+  });
+  const renderSingle = (n, idx, displayLabel) => {
     const pastClass = isPlanningPast(n.titel) ? ' notiz-past' : '';
+    const label = displayLabel || n.titel;
     return `<details class="notiz-item${pastClass}" data-titel="${escapeHtml(n.titel)}"${openSet.has(n.titel) ? ' open' : ''}>
       <summary class="notiz-summary">
-        <span class="notiz-titel">${escapeHtml(n.titel)}</span>
+        <span class="notiz-titel">${escapeHtml(label)}</span>
         <span class="notiz-datum">${n.datum}</span>
-        <button class="btn-x notiz-del" title="Bearbeiten" onclick="editNotiz(event,${idx})">✎</button>
-        <button class="btn-x notiz-del" title="Löschen" onclick="deleteNotiz(event,${idx})">✕</button>
+        <button class="btn-x notiz-del" title="Bearbeiten" onclick="editNotiz(event,${idx})">&#x270E;</button>
+        <button class="btn-x notiz-del" title="Löschen" onclick="deleteNotiz(event,${idx})">&#x2715;</button>
       </summary>
       <div class="notiz-body">${formatNotizText(n.text)}</div>
+    </details>`;
+  };
+  container.innerHTML = items.map(item => {
+    if (item.type === 'note') return renderSingle(item.n, item.idx);
+    const groupKey = 'Planung ' + item.kw;
+    const allPast = item.entries.every(e => isPlanningPast(e.n.titel));
+    const pastClass = allPast ? ' notiz-past' : '';
+    return `<details class="notiz-group${pastClass}" data-titel="${escapeHtml(groupKey)}"${openSet.has(groupKey) ? ' open' : ''}>
+      <summary class="notiz-summary">
+        <span class="notiz-titel">${escapeHtml(groupKey)}</span>
+        <span class="notiz-datum">${item.entries[0].n.datum}${item.entries[0].n.ts ? ' ' + new Date(item.entries[0].n.ts).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' }) : ''}</span>
+      </summary>
+      <div class="notiz-group-body">
+        ${item.entries.map(e => renderSingle(e.n, e.idx, e.day)).join('')}
+      </div>
     </details>`;
   }).join('');
 }
@@ -839,7 +1343,7 @@ function deleteNotiz(e, idx) {
 function toggleLernplanDay(day, checked) {
   learningplanProgress[day] = checked;
   saveLernplanProgress();
-  if (aktiverFokusTab === 'fuehrung' || aktiverFokusTab === 'tech') renderFokus();
+  if (aktiverFokusTab === 'wissen') renderFokus();
 }
 
 function deleteLink(idx) {
@@ -1013,12 +1517,76 @@ document.getElementById('btn-save-netzwerk').addEventListener('click', async () 
   delete modal.dataset.editIdx;
 });
 
+document.getElementById('btn-delete-netzwerk').addEventListener('click', async () => {
+  const modal   = document.getElementById('modal-netzwerk');
+  const editIdx = modal.dataset.editIdx !== undefined ? parseInt(modal.dataset.editIdx) : -1;
+  if (editIdx < 0) return;
+  const c = contactsData[editIdx];
+  if (!c) return;
+  if (!confirm('Kontakt "' + c.name + '" entfernen?')) return;
+  await deleteContact(c.name);
+  renderFokus();
+  closeModal('modal-netzwerk');
+  delete modal.dataset.editIdx;
+});
+
 document.getElementById('btn-add-contact').addEventListener('click', () => {
   document.getElementById('new-contact-name').value = '';
   document.getElementById('new-contact-rolle').value = '';
   document.getElementById('modal-add-contact').style.display = 'flex';
   setModalLock();
   document.getElementById('new-contact-name').focus();
+});
+
+document.getElementById('btn-sync-jira').addEventListener('click', handleJiraButton);
+
+let newsRefreshing = false;
+document.getElementById('btn-refresh-news').addEventListener('click', async function() {
+  if (newsRefreshing) return;
+  newsRefreshing = true;
+  const btn = this;
+  btn.disabled = true;
+  btn.style.opacity = '0.4';
+  const oldTs = newsData ? newsData.ts : 0;
+  fetch(`${WRITE_SERVER}/run-generate-news?force=1`, { method: 'POST' }).catch(() => {});
+  const started = Date.now();
+  const poll = async () => {
+    try {
+      const r = await fetch(v('knowledge/news.json'));
+      if (r.ok) {
+        const d = await r.json();
+        if (d.ts > oldTs) { newsData = d; if (aktiverFokusTab === 'news') renderFokus(); btn.disabled = false; btn.style.opacity = ''; newsRefreshing = false; return; }
+      }
+    } catch(e) {}
+    if (Date.now() - started < 3 * 60000) setTimeout(poll, 5000);
+    else { btn.disabled = false; btn.style.opacity = ''; newsRefreshing = false; }
+  };
+  setTimeout(poll, 5000);
+});
+
+document.getElementById('btn-refresh-ziele').addEventListener('click', async function() {
+  const btn = this;
+  btn.disabled = true;
+  btn.style.opacity = '0.4';
+  btn.textContent = 'Lade...';
+  try {
+    const [mRes, gRes] = await Promise.all([
+      fetch('data/mails_today.json?v=' + Date.now()),
+      fetch('knowledge/goals.json?v=' + Date.now()),
+    ]);
+    if (mRes.ok) mailData = await mRes.json();
+    if (gRes.ok) goalsData = await gRes.json();
+    zieleLastRefresh = new Date();
+    if (aktiverFokusTab === 'ziele') renderFokus();
+    btn.textContent = 'Aktualisiert';
+    setTimeout(() => { btn.textContent = '⟳ Aktualisieren'; }, 2000);
+  } catch(e) {
+    console.error('Ziele refresh error:', e);
+    btn.textContent = 'Fehler';
+    setTimeout(() => { btn.textContent = '⟳ Aktualisieren'; }, 2000);
+  }
+  btn.disabled = false;
+  btn.style.opacity = '';
 });
 
 document.getElementById('btn-save-new-contact').addEventListener('click', async () => {
@@ -1037,17 +1605,21 @@ document.getElementById('btn-plan-next-day').addEventListener('click', async () 
   planPolling = true;
   const btn = document.getElementById('btn-plan-next-day');
   btn.textContent = '⟳ …';
-  const triggeredAt = Date.now();
+  let snapshotTs = 0;
+  try {
+    const snap = await fetch('data/notes.json?v=' + Date.now());
+    if (snap.ok) { const sd = await snap.json(); const p = sd.find(n => n.titel && n.titel.startsWith('Planung KW')); if (p) snapshotTs = p.ts || 0; }
+  } catch(e) {}
   try {
     await fetch(`${WRITE_SERVER}/run-plan-week`, { method: 'POST' });
   } catch(e) {}
-  const deadline = triggeredAt + 8 * 60000;
+  const deadline = Date.now() + 8 * 60000;
   const poll = async () => {
     try {
       const r = await fetch('data/notes.json?v=' + Date.now());
       if (r.ok) {
         const data = await r.json();
-        const found = data.find(n => n.titel && n.titel.startsWith('Planung KW') && n.ts >= triggeredAt);
+        const found = data.find(n => n.titel && n.titel.startsWith('Planung KW') && n.ts > snapshotTs);
         if (found) {
           notizenData = data;
           renderFokus();
@@ -1080,15 +1652,20 @@ function openSyncModal(file, name) {
         body.innerHTML = '<div style="color:var(--text-muted);font-size:0.75rem;padding:8px 0">Keine Mails gefunden.</div>';
         return;
       }
-      body.innerHTML = mails.map(m => `
-        <div class="mail-item prio-${m.typ === 'gesendet' ? 'sent' : 'direct'}" style="padding:6px 4px;margin-bottom:2px">
+      body.innerHTML = mails.map(m => {
+        const prio = mailPrio(m);
+        const pm = PRIO_META[prio] || PRIO_META.fyi;
+        const label = m.typ === 'gesendet' ? '→ gesendet' : shortName(m.from);
+        return `<div class="mail-item ${pm.cls}" style="padding:6px 4px;margin-bottom:2px">
+          <span class="mail-prio" title="${pm.title}">${pm.label}</span>
           <div class="mail-time">${m.date} ${m.time}</div>
           <div class="mail-content">
-            <div class="mail-from">${escapeHtml(m.typ === 'gesendet' ? '→ ' + shortName(m.to) : shortName(m.from))}</div>
+            <div class="mail-from">${escapeHtml(label)}</div>
             <div class="mail-subject">${escapeHtml(m.subject)}</div>
             <div class="mail-body" style="display:none">${escapeHtml(m.body)}</div>
           </div>
-        </div>`).join('');
+        </div>`;
+      }).join('');
       body.querySelectorAll('.mail-item').forEach(el => {
         el.addEventListener('click', () => {
           const b = el.querySelector('.mail-body');
@@ -1112,10 +1689,13 @@ function closeModal(id) {
 function setModalLock() {
   fetch('http://127.0.0.1:9001/modal-lock?state=1', { method: 'POST' }).catch(() => {});
 }
+function isAnyModalOpen() {
+  return [...document.querySelectorAll('.modal-overlay')].some(m => m.style.display !== 'none');
+}
 
 // Close modal on overlay click
 document.querySelectorAll('.modal-overlay').forEach(el => {
-  el.addEventListener('click', e => { if (e.target === el) el.style.display = 'none'; });
+  el.addEventListener('click', e => { if (e.target === el) closeModal(el.id); });
 });
 
 // ── Main render ────────────────────────────────────────────────────────────
@@ -1124,6 +1704,7 @@ function renderAll() {
   renderKalender();
   renderFokus();
   renderActions();
+  renderMails();
 }
 
 // ── ICS Import ─────────────────────────────────────────────────────────────
@@ -1147,8 +1728,8 @@ function icsDateToLocal(val) {
 }
 
 function linkify(text) {
-  return text.replace(/(https?:\/\/[^\s]+)/g, url =>
-    `<a href="${url}" target="_blank" class="action-link">${url}</a>`
+  return escapeHtml(text).replace(/(https?:\/\/[^\s&lt;&quot;]+)/g, url =>
+    `<a href="${safeHref(url)}" target="_blank" rel="noopener noreferrer" class="action-link">${url}</a>`
   );
 }
 
@@ -1267,17 +1848,46 @@ async function loadMails(skipRender = false) {
     if (!skipRender) renderMails();
   } catch(e) { console.error('loadMails error:', e); }
   checkSummaryExists();
-  if (!expertMode) renderSimpleBar();
+  if (currentMode === 'simple') renderSimpleBar();
 }
 
 function escapeHtml(s) {
-  return (s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  return (s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function safeHref(url) {
+  try { const u = new URL(url); return (u.protocol === 'http:' || u.protocol === 'https:') ? escapeHtml(url) : '#'; }
+  catch { return '#'; }
 }
 
 function renderMails() {
   const body  = document.getElementById('mails-body');
   const count = document.getElementById('mails-count');
   const tabs  = document.getElementById('mail-tabs');
+
+  // Focus mode: compact mail display (today's count + top mails)
+  if (currentMode === 'focus') {
+    const now = new Date();
+    const todayKey = now.getDate().toString().padStart(2,'0') + '.' + (now.getMonth()+1).toString().padStart(2,'0') + '.';
+    const todayMails = mailData.filter(m => m.date === todayKey && m.typ !== 'gesendet');
+    const totalWeek = mailData.length;
+    count.textContent = todayMails.length + ' heute, ' + totalWeek + ' Woche';
+    tabs.innerHTML = '';
+    if (!todayMails.length) {
+      body.innerHTML = '<div style="color:var(--text-muted);font-size:0.72rem;padding:4px 0">Keine Mails heute</div>';
+      return;
+    }
+    body.innerHTML = todayMails.slice(0, 5).map(m => {
+      const prio = mailPrio(m);
+      const pm = PRIO_META[prio] || PRIO_META.fyi;
+      const name = shortName(m.from);
+      return `<div class="mail-item ${pm.cls}" style="padding:2px 0"><span class="mail-prio" title="${pm.title}">${pm.label}</span><span class="mail-time">${m.time}</span><em style="font-size:0.68rem">${escapeHtml(name)}</em> <span style="font-size:0.66rem;color:var(--text-muted)">${escapeHtml(m.subject)}</span></div>`;
+    }).join('');
+    if (todayMails.length > 5) {
+      body.innerHTML += `<div style="color:var(--text-muted);font-size:0.64rem;padding:2px 0">+${todayMails.length - 5} weitere</div>`;
+    }
+    return;
+  }
 
   if (!mailData.length) {
     count.textContent = '0 Mails';
@@ -1570,24 +2180,52 @@ async function updateSyncStatus() {
     if (!r.ok) { el.textContent = ''; return; }
     const d = await r.json();
     const last    = new Date(d.ts);
-    const lastStr = last.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Berlin' });
+    const lastTime = last.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Berlin' });
+    const lastDate = last.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', timeZone: 'Europe/Berlin' });
     const now   = new Date();
+    const todayDate = now.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', timeZone: 'Europe/Berlin' });
+    const lastStr = lastDate === todayDate ? lastTime : lastDate + ' ' + lastTime;
     const t0730 = new Date(now); t0730.setHours(7, 30, 0, 0);
     const t1230 = new Date(now); t1230.setHours(12, 30, 0, 0);
     let next;
     if (now < t0730)      next = t0730;
     else if (now < t1230) next = t1230;
     else { next = new Date(t0730); next.setDate(next.getDate() + 1); }
-    const nextStr = next.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' });
-    el.textContent = `⟳ ${lastStr} | ↻ ${nextStr}`;
+    const nextDay = next.toLocaleDateString('de-DE', { weekday: 'short' });
+    const nextTime = next.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' });
+    const isNextToday = next.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit' }) === todayDate;
+    const nextStr = isNextToday ? nextTime : nextDay + ' ' + nextTime;
+    el.textContent = `${lastStr} · ⟳ ${nextStr}`;
   } catch(e) { el.textContent = ''; }
 }
+
+// ── Quote refresh button ──────────────────────────────────────────────────
+document.getElementById('btn-refresh-quote').addEventListener('click', function() {
+  const btn = this;
+  btn.disabled = true;
+  btn.style.opacity = '0.4';
+  const oldTs = quoteData ? quoteData.ts : 0;
+  fetch(`${WRITE_SERVER}/run-generate-quote?force=1`, { method: 'POST' }).catch(() => {});
+  const started = Date.now();
+  const poll = async () => {
+    try {
+      const r = await fetch(v('knowledge/quotes.json'));
+      if (r.ok) {
+        const d = await r.json();
+        if (d.ts > oldTs) { quoteData = d; renderHeader(); btn.disabled = false; btn.style.opacity = ''; return; }
+      }
+    } catch(e) {}
+    if (Date.now() - started < 2 * 60000) setTimeout(poll, 5000);
+    else { btn.disabled = false; btn.style.opacity = ''; }
+  };
+  setTimeout(poll, 3000);
+});
 
 // ── Init ───────────────────────────────────────────────────────────────────
 fetch('data/config.json').then(r => r.json()).then(cfg => {
   if (cfg.myAddresses) MY_ADDRESSES = cfg.myAddresses;
 }).catch(() => {}).finally(() => {
-  applyMode(expertMode);
+  applyMode(currentMode);
   loadAll();
   loadMails();
   const startedAt = Date.now();
@@ -1596,6 +2234,37 @@ fetch('data/config.json').then(r => r.json()).then(cfg => {
     fetch(`${WRITE_SERVER}/run-export-mails`, { method: 'POST' }).catch(() => {});
   }
   updateSyncStatus();
+  // Quote: auto-trigger if missing or outdated
+  const todayStr = new Date().toISOString().slice(0, 10);
+  if (!quoteData || quoteData.date !== todayStr) {
+    fetch(`${WRITE_SERVER}/run-generate-quote`, { method: 'POST' }).catch(() => {});
+    const pollQuote = async () => {
+      try {
+        const r = await fetch(v('knowledge/quotes.json'));
+        if (r.ok) {
+          const d = await r.json();
+          if (d.date === todayStr) { quoteData = d; renderHeader(); return; }
+        }
+      } catch(e) {}
+      if (Date.now() - startedAt < 2 * 60000) setTimeout(pollQuote, 5000);
+    };
+    setTimeout(pollQuote, 5000);
+  }
+  // News: auto-trigger if missing or outdated
+  if (!newsData || newsData.date !== todayStr) {
+    fetch(`${WRITE_SERVER}/run-generate-news`, { method: 'POST' }).catch(() => {});
+    const pollNews = async () => {
+      try {
+        const r = await fetch(v('knowledge/news.json'));
+        if (r.ok) {
+          const d = await r.json();
+          if (d.date === todayStr) { newsData = d; if (aktiverFokusTab === 'news') renderFokus(); return; }
+        }
+      } catch(e) {}
+      if (Date.now() - startedAt < 3 * 60000) setTimeout(pollNews, 5000);
+    };
+    setTimeout(pollNews, 5000);
+  }
   const pollSyncInit = async () => {
     try {
       const r = await fetch('data/mail_sync_status.json?v=' + Date.now());
@@ -1608,9 +2277,10 @@ fetch('data/config.json').then(r => r.json()).then(cfg => {
   };
   setTimeout(pollSyncInit, 5000);
 });
-setInterval(renderHeader, 60000);
-setInterval(loadICSAuto, 30 * 60000);
+setInterval(() => { if (!isAnyModalOpen()) renderHeader(); }, 60000);
+setInterval(() => { if (!isAnyModalOpen()) loadICSAuto(); }, 30 * 60000);
 setInterval(() => {
+  if (isAnyModalOpen()) return;
   const anyOpen = document.querySelector('.mail-body[style*="display: block"], .mail-body[style*="display:block"]');
   if (!anyOpen) loadMails();
 }, 30 * 60000);

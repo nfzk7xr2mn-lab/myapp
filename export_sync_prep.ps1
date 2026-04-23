@@ -9,8 +9,8 @@ $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $outputDir = Join-Path $scriptDir "data"
 if (-not (Test-Path $outputDir)) { New-Item -ItemType Directory -Path $outputDir | Out-Null }
 
-# Chef + alle Mitarbeiter als Suchpool
-$SyncPersonen = @($Mitarbeiter) + @(@{ name = $ChefName; email = $ChefEmail })
+# Alle Mitarbeiter (inkl. Chef) als Suchpool
+$SyncPersonen = @($Mitarbeiter)
 
 $outlook  = New-Object -ComObject Outlook.Application
 try {
@@ -44,7 +44,7 @@ foreach ($appt in $tomorrowItems) {
         $summary = $appt.Subject.ToLower()
         Write-Host "  Termin: $($appt.Subject)" -ForegroundColor DarkGray
         foreach ($ma in $SyncPersonen) {
-            $nameParts = ($ma.name -split '[,\s]+') | Where-Object { $_.Length -gt 2 }
+            $nameParts = ($ma.name -split '[,\s.]+') | Where-Object { $_.Length -gt 2 }
             $match = [bool]($nameParts | Where-Object { $summary -match "\b$([regex]::Escape($_.ToLower()))\b" })
             if ($match -and ($gefunden | Where-Object { $_.email -eq $ma.email }).Count -eq 0) {
                 $gefunden += $ma
@@ -95,17 +95,17 @@ Write-Host "  $($allSent.Count) gesendet" -ForegroundColor Gray
 # ── Export mails per person ──────────────────────────────────────────────────
 foreach ($ma in $gefunden) {
     $emailLower = $ma.email.ToLower()
-    $nameParts  = ($ma.name -split '[, ]+') | Where-Object { $_.Length -gt 2 }
-    $vorname    = ($ma.name -split '[, ]+') | Where-Object { $_ -cmatch '^[A-Z]' } | Select-Object -Last 1
+    $vorname    = ($ma.name -split '\s')[0]
 
     $mails = @()
 
     foreach ($mail in $allInbox) {
         try {
-            $fromLower = ($mail.SenderEmailAddress + ' ' + $mail.SenderName).ToLower()
-            $isFrom = ($fromLower -like "*$emailLower*") -or
-                      [bool]($nameParts | Where-Object { $fromLower -match "\b$([regex]::Escape($_.ToLower()))\b" })
-            if (-not $isFrom) { continue }
+            $senderAddr = $mail.SenderEmailAddress
+            if ($senderAddr -like '/O=*') {
+                try { $senderAddr = $outlook.Session.CreateRecipient($mail.SenderName).AddressEntry.GetExchangeUser().PrimarySmtpAddress } catch { $senderAddr = '' }
+            }
+            if ($senderAddr.ToLower() -ne $emailLower) { continue }
             $bodyTrimmed = ($mail.Body -replace '\r?\n+', ' ').Trim()
             $mails += [PSCustomObject]@{
                 date    = $mail.ReceivedTime.ToString("dd.MM.yyyy")
@@ -121,13 +121,18 @@ foreach ($ma in $gefunden) {
 
     foreach ($mail in $allSent) {
         try {
-            $toLower = $mail.To.ToLower()
-            $ccLower = $mail.CC.ToLower()
-            $isInTo = ($toLower -like "*$emailLower*") -or
-                      [bool]($nameParts | Where-Object { $toLower -match "\b$([regex]::Escape($_.ToLower()))\b" })
-            $isInCc = ($ccLower -like "*$emailLower*") -or
-                      [bool]($nameParts | Where-Object { $ccLower -match "\b$([regex]::Escape($_.ToLower()))\b" })
-            if (-not $isInTo) { continue }
+            $toRecips = @()
+            for ($ri = 1; $ri -le $mail.Recipients.Count; $ri++) {
+                $recip = $mail.Recipients.Item($ri)
+                if ($recip.Type -eq 1) {
+                    $addr = $recip.Address
+                    if ($addr -like '/O=*') {
+                        try { $addr = $recip.AddressEntry.GetExchangeUser().PrimarySmtpAddress } catch {}
+                    }
+                    $toRecips += $addr.ToLower()
+                }
+            }
+            if ($toRecips -notcontains $emailLower) { continue }
             $bodyTrimmed = ($mail.Body -replace '\r?\n+', ' ').Trim()
             $mails += [PSCustomObject]@{
                 date    = $mail.SentOn.ToString("dd.MM.yyyy")
@@ -155,7 +160,7 @@ foreach ($ma in $gefunden) {
 
 # ── Write sync_files.json ────────────────────────────────────────────────────
 $syncEntries = $gefunden | ForEach-Object {
-    $vorname = ($_.name -split '[, ]+') | Where-Object { $_ -cmatch '^[A-Z]' } | Select-Object -Last 1
+    $vorname = ($_.name -split '\s')[0]
     @{ name = $_.name; file = ("KW{0}-{1}.json" -f $kw, $vorname); date = $tomorrow.ToString("yyyyMMdd") }
 }
 $syncJson = $syncEntries | ConvertTo-Json -Depth 2

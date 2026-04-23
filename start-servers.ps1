@@ -4,6 +4,14 @@
 $appDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $port   = 9001
 
+# Ensure System32 and Node.js are in PATH (needed when started from non-interactive shells)
+$sysPaths = @("$env:SystemRoot\System32", "C:\Windows\System32", "C:\Program Files\nodejs")
+foreach ($sp in $sysPaths) {
+    if ((Test-Path $sp) -and ($env:PATH -notlike "*$sp*")) {
+        $env:PATH = "$sp;$env:PATH"
+    }
+}
+
 # Stop processes on port 9001 and 5500 only (not all node processes)
 foreach ($p in @(9001, 5500)) {
     $procs = Get-NetTCPConnection -LocalPort $p -ErrorAction SilentlyContinue |
