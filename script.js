@@ -196,7 +196,8 @@ let linksData    = [];
 let sportData    = [];
 let notizenData  = [];
 let contactsData = [];
-let quoteData    = null;
+let quotesAll    = [];
+let quoteIndex   = -1;
 let newsData     = null;
 let icsEvents       = [];
 let icsTomorrowEvents = [];
@@ -210,6 +211,7 @@ let jiraData             = [];
 let jiraToolsetData      = [];
 let goalsData            = null;
 let zieleLastRefresh     = null;
+let videosData           = [];
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 function todayStr() {
@@ -286,7 +288,7 @@ async function loadICSAuto() {
 // ── Load data ──────────────────────────────────────────────────────────────
 async function loadAll() {
   try {
-    const [tRes, aRes, lRes, lnRes, lpRes, lpProg, spRes, nRes, sfRes, ctRes, qRes, jRes, jtRes, nwRes, jsRes, glRes] = await Promise.all([
+    const [tRes, aRes, lRes, lnRes, lpRes, lpProg, spRes, nRes, sfRes, ctRes, qRes, jRes, jtRes, nwRes, jsRes, glRes, vdRes] = await Promise.all([
       fetch(v('data/termine.txt')),
       fetch(v('data/actions.json')),
       fetch(v('data/learn.txt')),
@@ -297,12 +299,13 @@ async function loadAll() {
       fetch(v('data/notes.json')),
       fetch(v('data/sync_files.json')),
       fetch(v('data/contacts.json')),
-      fetch(v('knowledge/quotes.json')),
+      fetch(v('knowledge/quotes_366.json')),
       fetch(v('data/jira.json')),
       fetch(v('data/jira_toolset.json')),
       fetch(v('knowledge/news.json')),
       fetch(v('data/jira_status.json')),
       fetch(v('knowledge/goals.json')),
+      fetch(v('knowledge/videos.json')),
     ]);
     if (tRes.ok)   rawTermine       = await tRes.text();
     if (aRes.ok)   actionsData      = await aRes.json();
@@ -314,22 +317,33 @@ async function loadAll() {
     if (nRes.ok)   notizenData      = await nRes.json();
     if (sfRes.ok)  syncFiles        = await sfRes.json();
     if (ctRes.ok)  contactsData     = await ctRes.json();
-    if (qRes.ok)   quoteData        = await qRes.json();
+    if (qRes.ok)   quotesAll        = await qRes.json();
     if (jRes.ok)   jiraData         = await jRes.json();
     if (jtRes.ok)  jiraToolsetData  = await jtRes.json();
     if (nwRes.ok)  newsData         = await nwRes.json();
-    if (jsRes.ok) { const js = await jsRes.json(); if (js.ts) jiraLastSyncTs = js.ts; }
+    if (jsRes.ok) {
+      const js = await jsRes.json();
+      if (js.ts) jiraLastSyncTs = js.ts;
+      if (js.status === 'error' && js.message && js.message.includes('oken')) {
+        jiraSetupMode = true;
+        jiraSetupHint = '';
+        _jiraStatusMsg = 'Token fehlt. Bitte in PowerShell ausfuehren: setup_jira.ps1';
+        _jiraStatusType = 'error';
+      }
+    }
     if (glRes.ok)  goalsData        = await glRes.json();
+    if (vdRes.ok)  videosData       = await vdRes.json();
   } catch(e) { console.error('Load error', e); }
   await loadICSAuto();
   aktiverFokusTab = defaultFokusTab();
   syncFokusTabUI();
   renderAll();
+  if (jiraSetupMode) updateJiraButton('Synchronisieren', true);
 }
 
 function defaultFokusTab() {
   const saved = localStorage.getItem('fokusTab');
-  const validTabs = ['notizen', 'wissen', 'links', 'netzwerk', 'jira', 'ziele', 'news'];
+  const validTabs = ['notizen', 'wissen', 'links', 'netzwerk', 'jira', 'ziele', 'videos', 'news'];
   if (saved && validTabs.includes(saved)) return saved;
   const h = new Date().getHours();
   if (h < 8)  return 'wissen';
@@ -348,7 +362,8 @@ function syncFokusTabUI() {
   document.getElementById('btn-sync-jira').style.display     = (aktiverFokusTab === 'jira')     ? '' : 'none';
   document.getElementById('btn-refresh-ziele').style.display = (aktiverFokusTab === 'ziele')    ? '' : 'none';
   document.getElementById('btn-refresh-news').style.display  = (aktiverFokusTab === 'news')     ? '' : 'none';
-  const hasBtn = aktiverFokusTab === 'links' || aktiverFokusTab === 'notizen' || aktiverFokusTab === 'netzwerk' || aktiverFokusTab === 'jira' || aktiverFokusTab === 'news' || aktiverFokusTab === 'ziele';
+  document.getElementById('btn-add-video').style.display     = (aktiverFokusTab === 'videos')   ? '' : 'none';
+  const hasBtn = aktiverFokusTab === 'links' || aktiverFokusTab === 'notizen' || aktiverFokusTab === 'netzwerk' || aktiverFokusTab === 'jira' || aktiverFokusTab === 'news' || aktiverFokusTab === 'ziele' || aktiverFokusTab === 'videos';
   document.querySelector('#tile-fokus .tile-footer').classList.toggle('has-button', hasBtn);
   document.getElementById('btn-fokus-placeholder').style.display = hasBtn ? 'none' : '';
 }
@@ -443,10 +458,17 @@ function renderHeader() {
   document.getElementById('phase-badge').textContent = phase.label;
   document.body.className = phase.css + ' mode-' + currentMode;
   const quoteEl = document.getElementById('header-quote');
-  if (quoteEl && quoteData && quoteData.text) {
-    const surname = (quoteData.author || '').split(/\s+/).pop();
-    quoteEl.textContent = `„${quoteData.text}“ — ${surname}`;
-    quoteEl.title = `${quoteData.author}, ${quoteData.work || ''}`;
+  if (quoteEl && quotesAll.length) {
+    const now2 = new Date();
+    const startOfYear = new Date(now2.getFullYear(), 0, 0);
+    const dayOfYear = Math.floor((now2 - startOfYear) / 86400000) - 1;
+    if (quoteIndex < 0) quoteIndex = ((dayOfYear % quotesAll.length) + quotesAll.length) % quotesAll.length;
+    const q = quotesAll[quoteIndex];
+    if (q) {
+      const surname = (q.author || '').split(/\s+/).pop();
+      quoteEl.textContent = '„' + q.text + '“ — ' + surname;
+      quoteEl.title = q.author + (q.work ? ', ' + q.work : '');
+    }
   }
   if (currentMode === 'simple') renderSimpleBar();
 }
@@ -601,9 +623,11 @@ function switchFokusTab(tab) {
   document.getElementById('btn-add-notiz').style.display   = (tab === 'notizen') ? '' : 'none';
   document.getElementById('btn-plan-next-day').style.display = (tab === 'notizen') ? '' : 'none';
   document.getElementById('btn-add-contact').style.display = (tab === 'netzwerk') ? '' : 'none';
-  document.getElementById('btn-sync-jira').style.display   = (tab === 'jira')     ? '' : 'none';
-  document.getElementById('btn-refresh-news').style.display = (tab === 'news')     ? '' : 'none';
-  const hasBtn = tab === 'links' || tab === 'notizen' || tab === 'netzwerk' || tab === 'jira' || tab === 'news';
+  document.getElementById('btn-sync-jira').style.display     = (tab === 'jira')     ? '' : 'none';
+  document.getElementById('btn-refresh-ziele').style.display = (tab === 'ziele')    ? '' : 'none';
+  document.getElementById('btn-refresh-news').style.display  = (tab === 'news')     ? '' : 'none';
+  document.getElementById('btn-add-video').style.display     = (tab === 'videos')   ? '' : 'none';
+  const hasBtn = tab === 'links' || tab === 'notizen' || tab === 'netzwerk' || tab === 'jira' || tab === 'news' || tab === 'ziele' || tab === 'videos';
   document.querySelector('#tile-fokus .tile-footer').classList.toggle('has-button', hasBtn);
   renderFokus();
   renderFokus();
@@ -657,6 +681,12 @@ function renderFokus() {
     return;
   }
 
+  if (aktiverFokusTab === 'videos') {
+    fokusKat.textContent = videosData.length ? videosData.length + ' Videos' : '';
+    renderVideos(fokusBody);
+    return;
+  }
+
   fokusBody.innerHTML = '';
 }
 
@@ -664,49 +694,102 @@ function renderFokus() {
 // ── Render Jira ─────────────────────────────────────────────────────────
 function renderJiraItem(j) {
   const st = (j.status || '').toLowerCase();
-  const statusClass = st.includes('progress') || st.includes('review') || st === 'running' ? 'jira-status-progress'
-                    : st === 'done' || st === 'closed' ? 'jira-status-done'
+  const isCompleted = st === 'completed' || st === 'finished' || st === 'done' || st === 'closed';
+  const isClosed = st === 'cancelled' || st === 'stopped' || st === 'inactive';
+  const isRejected = st === 'rejected';
+  const isHousekeeping = (j.summary || '').toUpperCase().startsWith('HOUSEKEEPING');
+  const isBlocked = (j.summary || '').toUpperCase().startsWith('BLOCKED');
+  const isDone = isCompleted || isClosed || isRejected;
+  const statusClass = isRejected ? 'jira-status-done jira-rejected'
+                    : isCompleted ? 'jira-status-done jira-completed'
+                    : isClosed ? 'jira-status-done jira-closed'
+                    : isHousekeeping ? 'jira-status-hold'
+                    : isBlocked ? 'jira-status-blocked'
+                    : st.includes('progress') || st.includes('review') || st === 'running' ? 'jira-status-progress'
                     : st === 'blocked' ? 'jira-status-blocked'
                     : st === 'on hold' ? 'jira-status-hold'
                     : 'jira-status-todo';
-  const shortKey = j.key.replace('CLMSLORCHESTRATOR', 'SLOCON').replace(/CLMSLCCI4ABAP/, 'CLOUDLM');
-  return '<a class="jira-pill ' + statusClass + '" href="' + safeHref(j.url) + '" title="' + escapeHtml(j.summary) + ' [' + escapeHtml(j.status) + ']" onclick="openExternal(this.href);return false;">' + escapeHtml(shortKey) + '</a>';
+  const shortKey = j.category
+    ? j.category + '-' + (j.key || '').replace(/^[A-Z]+-/, '')
+    : j.key.replace('CLMSLORCHESTRATOR', 'SLOCON').replace(/CLMSLCCI4ABAP/, 'CLOUDLM');
+  let dot = '';
+  if (isDone) {
+    const summaryUp = (j.summary || '').toUpperCase();
+    const failed = summaryUp.includes('CANCELLED') || st === 'rejected' || st === 'stopped' || st === 'cancelled';
+    dot = '<span class="jira-dot ' + (failed ? 'jira-dot-fail' : 'jira-dot-pass') + '"></span>';
+  }
+  return '<a class="jira-pill ' + statusClass + '" href="' + safeHref(j.url) + '" title="' + escapeHtml(j.summary) + ' [' + escapeHtml(j.status) + ']" onclick="openExternal(this.href);return false;">' + escapeHtml(shortKey) + dot + '</a>';
 }
 
 function renderJiraToolsetItem(j) {
   const cat = j.category || '';
   const num = (j.key || '').replace(/^[A-Z]+-/, '');
-  const label = cat ? cat + '-' + num : j.key;
+  const label = num;
+  const fullLabel = cat ? cat + '-' + num : j.key;
   const st = (j.status || '').toLowerCase();
-  const statusClass = st.includes('progress') || st.includes('review') || st === 'running' ? 'jira-status-progress'
-                    : st === 'done' || st === 'closed' ? 'jira-status-done'
+  const isCompleted = st === 'completed' || st === 'finished' || st === 'done' || st === 'closed';
+  const isClosed = st === 'cancelled' || st === 'stopped' || st === 'inactive';
+  const isRejected = st === 'rejected';
+  const isHousekeeping = (j.summary || '').toUpperCase().startsWith('HOUSEKEEPING');
+  const isBlocked = (j.summary || '').toUpperCase().startsWith('BLOCKED');
+  const isDone = isCompleted || isClosed || isRejected;
+  const statusClass = isRejected ? 'jira-status-done jira-rejected'
+                    : isCompleted ? 'jira-status-done jira-completed'
+                    : isClosed ? 'jira-status-done jira-closed'
+                    : isHousekeeping ? 'jira-status-hold'
+                    : isBlocked ? 'jira-status-blocked'
+                    : st.includes('progress') || st.includes('review') || st === 'running' ? 'jira-status-progress'
                     : st === 'blocked' ? 'jira-status-blocked'
                     : st === 'on hold' ? 'jira-status-hold'
                     : 'jira-status-todo';
-  return '<a class="jira-pill ' + statusClass + '" href="' + safeHref(j.url) + '" title="' + escapeHtml(j.summary) + ' [' + escapeHtml(j.status) + ']" onclick="openExternal(this.href);return false;">' + escapeHtml(label) + '</a>';
+  let dot = '';
+  if (isDone) {
+    const summaryUp = (j.summary || '').toUpperCase();
+    const failed = summaryUp.includes('CANCELLED') || st === 'rejected' || st === 'stopped' || st === 'cancelled';
+    dot = '<span class="jira-dot ' + (failed ? 'jira-dot-fail' : 'jira-dot-pass') + '"></span>';
+  }
+  return '<a class="jira-pill ' + statusClass + '" href="' + safeHref(j.url) + '" title="' + escapeHtml(fullLabel) + ': ' + escapeHtml(j.summary) + ' [' + escapeHtml(j.status) + ']" onclick="openExternal(this.href);return false;">' + escapeHtml(label) + dot + '</a>';
 }
 
 function renderJira(container) {
-  if (!jiraData.length) {
+  if (!jiraData.length && !_jiraStatusMsg) {
     container.innerHTML = '<div style="color:var(--text-muted);font-size:0.75rem;padding:8px 0">Keine Jira-Items geladen.</div>';
     return;
   }
-  const statusOrder = { 'In Progress': 0, 'Running': 0, 'In Review': 1, 'On Hold': 2, 'Blocked': 2, 'To Do': 3, 'Open': 3, 'Planned': 4, 'Reopened': 3 };
+  let bannerHtml = '';
+  if (_jiraStatusMsg) {
+    const cls = _jiraStatusType === 'ok' ? ' jira-status-ok' : _jiraStatusType === 'error' ? ' jira-status-error' : '';
+    bannerHtml = '<div class="jira-status-banner' + cls + '">' + escapeHtml(_jiraStatusMsg) + '</div>';
+  }
+  if (!jiraData.length) {
+    container.innerHTML = bannerHtml + '<div style="color:var(--text-muted);font-size:0.75rem;padding:8px 0">Keine Jira-Items geladen.</div>';
+    return;
+  }
+  const statusOrder = { 'In Progress': 0, 'Running': 0, 'In Review': 1, 'On Hold': 2, 'Blocked': 2, 'To Do': 3, 'Open': 3, 'Planned': 4, 'Reopened': 3, 'Rejected': 7, 'Inactive': 8, 'Done': 8, 'Closed': 8, 'Cancelled': 8, 'Finished': 8 };
   const sortItems = (items) => [...items].sort((a, b) => {
     const sa = statusOrder[a.status] !== undefined ? statusOrder[a.status] : 5;
     const sb = statusOrder[b.status] !== undefined ? statusOrder[b.status] : 5;
     if (sa !== sb) return sa - sb;
     return (b.updated || '').localeCompare(a.updated || '');
   });
-  const open = jiraData.filter(j => j.status !== 'Done' && j.status !== 'Closed' && j.status !== 'Cancelled' && j.status !== 'Finished');
-  if (!open.length) {
+  const closedStatuses = ['Done', 'Closed', 'Cancelled', 'Finished', 'Rejected', 'Completed', 'Stopped', 'Inactive'];
+  const toolsetProjects = ['CLMOQHEC', 'HECSPCVAL', 'CLMCONSUMABILITY'];
+  const isToolset = j => !j.personal && (j.releases && j.releases.length || toolsetProjects.includes(j.project));
+  const open = jiraData.filter(j => !closedStatuses.includes(j.status));
+  const closedToolset = jiraData.filter(j => closedStatuses.includes(j.status) && isToolset(j));
+  const closedPersonal = jiraData.filter(j => closedStatuses.includes(j.status) && j.personal && (j.releases && j.releases.length));
+  const hasItems = open.length || closedToolset.length || closedPersonal.length;
+  if (!hasItems) {
     container.innerHTML = '<div style="color:var(--text-muted);font-size:0.75rem;padding:8px 0">Alle Items erledigt.</div>';
     return;
   }
-  const myItems = sortItems(open.filter(j => !j.releases || !j.releases.length));
-  const toolsetItems = open.filter(j => j.releases && j.releases.length);
+  const myOpen = sortItems(open.filter(j => !isToolset(j)));
+  const myItems = sortItems(myOpen.concat(closedPersonal));
+  const toolsetOpen = open.filter(j => isToolset(j));
+  const toolsetItems = toolsetOpen.concat(closedToolset);
 
-  let html = jiraSetupHint ? '<div class="jira-setup-hint">' + escapeHtml(jiraSetupHint) + '</div>' : '';
+  let html = bannerHtml;
+  if (jiraSetupHint) html += '<div class="jira-setup-hint">' + escapeHtml(jiraSetupHint) + '</div>';
 
   if (myItems.length) {
     const myGroups = {};
@@ -720,7 +803,7 @@ function renderJira(container) {
       + '<summary class="jira-tree-summary-root">Meine <span class="jira-tree-count">(' + myItems.length + ')</span></summary>'
       + myKeys.map(p =>
           '<div class="jira-cat-group">'
-          + '<span class="jira-cat-label">' + escapeHtml(p.replace('CLMSLORCHESTRATOR', 'SLOCON').replace(/CLMSLCCI4ABAP/, 'CLOUDLM')) + '</span>'
+          + '<span class="jira-cat-label" data-cat="' + escapeHtml(p.replace('CLMSLORCHESTRATOR', 'SLOCON').replace(/CLMSLCCI4ABAP/, 'CLOUDLM')) + '">' + escapeHtml(p.replace('CLMSLORCHESTRATOR', 'SLOCON').replace(/CLMSLCCI4ABAP/, 'CLOUDLM')) + '</span>'
           + '<span class="jira-pill-wrap">' + myGroups[p].map(renderJiraItem).join('') + '</span>'
           + '</div>'
         ).join('')
@@ -730,12 +813,20 @@ function renderJira(container) {
   if (toolsetItems.length) {
     const releaseMap = {};
     toolsetItems.forEach(j => {
-      j.releases.forEach(rel => {
-        if (!releaseMap[rel]) releaseMap[rel] = [];
-        releaseMap[rel].push(j);
-      });
+      if (j.releases && j.releases.length) {
+        j.releases.forEach(rel => {
+          if (!releaseMap[rel]) releaseMap[rel] = [];
+          releaseMap[rel].push(j);
+        });
+      } else {
+        if (!releaseMap['—']) releaseMap['—'] = [];
+        releaseMap['—'].push(j);
+      }
     });
-    const releaseKeys = Object.keys(releaseMap).sort((a, b) => b.localeCompare(a));
+    const releaseKeys = Object.keys(releaseMap).sort((a, b) => {
+      if (a === '—') return 1; if (b === '—') return -1;
+      return b.localeCompare(a);
+    });
     const uniqueCount = toolsetItems.length;
     const catOrder = { 'REGR': 0, 'RAMP': 1, 'SLV': 2 };
     html += '<details class="jira-tree-root">'
@@ -749,11 +840,38 @@ function renderJira(container) {
             catGroups[cat].push(j);
           });
           const catKeys = Object.keys(catGroups).sort((a, b) => ((catOrder[a] ?? 9) - (catOrder[b] ?? 9)));
-          return '<details class="jira-tree-project" open>'
-            + '<summary class="jira-tree-summary-project">Release ' + escapeHtml(rel) + ' <span class="jira-tree-count">(' + items.length + ')</span></summary>'
+          const criticalItems = items.filter(j => j.category === 'REGR' || j.category === 'SLV');
+          const rampItems = items.filter(j => j.category === 'RAMP');
+          const doneStatuses = ['completed', 'finished', 'done', 'closed', 'cancelled', 'stopped', 'rejected'];
+          const allDone = items.every(j => doneStatuses.includes((j.status || '').toLowerCase()));
+          let passCount = 0, failCount = 0;
+          if (allDone) {
+            const countItem = (j) => {
+              const s = (j.status || '').toLowerCase();
+              const su = (j.summary || '').toUpperCase();
+              return su.includes('CANCELLED') || s === 'rejected' || s === 'stopped' || s === 'cancelled';
+            };
+            criticalItems.forEach(j => { if (countItem(j)) failCount++; else passCount++; });
+          }
+          const relLabel = rel === '—' ? 'Kein Release' : 'Release ' + escapeHtml(rel);
+          let relStats = '';
+          if (allDone && (passCount + failCount > 0)) {
+            relStats = '<span class="jira-rel-stats">'
+              + '<span class="jira-rel-pass">' + passCount + '</span>'
+              + '<span class="jira-rel-sep">/</span>'
+              + '<span class="jira-rel-fail">' + failCount + '</span>'
+              + '</span>';
+          }
+          const relDot = (allDone && failCount === 0) ? '<span class="jira-dot jira-dot-pass"></span>' : '';
+          const relClass = 'jira-tree-summary-project' + (allDone ? ' jira-release-done' : '');
+          return '<details class="jira-tree-project"' + (allDone ? '' : ' open') + '>'
+            + '<summary class="' + relClass + '">'
+            + '<span class="jira-rel-label">' + relLabel + '</span>'
+            + relStats + relDot
+            + '</summary>'
             + catKeys.map(cat =>
                 '<div class="jira-cat-group">'
-                + '<span class="jira-cat-label">' + escapeHtml(cat) + '</span>'
+                + '<span class="jira-cat-label" data-cat="' + escapeHtml(cat) + '">' + escapeHtml(cat) + '</span>'
                 + '<span class="jira-pill-wrap">' + catGroups[cat].map(renderJiraToolsetItem).join('') + '</span>'
                 + '</div>'
               ).join('')
@@ -782,11 +900,15 @@ let jiraLastSyncTs = 0;
 
 async function pollJiraStatus(maxMs, intervalMs) {
   const deadline = Date.now() + maxMs;
+  const oldTs = jiraLastSyncTs || 0;
   while (Date.now() < deadline) {
     await new Promise(r => setTimeout(r, intervalMs));
     try {
       const res = await fetch(v('data/jira_status.json'));
-      if (res.ok) return await res.json();
+      if (res.ok) {
+        const data = await res.json();
+        if (data.ts && data.ts > oldTs) return data;
+      }
     } catch(e) {}
   }
   return null;
@@ -800,12 +922,36 @@ function updateJiraButton(text, enabled) {
   btn.style.opacity = enabled ? '' : '0.5';
 }
 
+let _jiraStatusMsg = '';
+let _jiraStatusType = '';
+function setJiraStatus(msg, type) {
+  _jiraStatusMsg = msg;
+  _jiraStatusType = type || '';
+  if (aktiverFokusTab === 'jira') {
+    const el = document.getElementById('fokus-body');
+    let banner = el.querySelector('.jira-status-banner');
+    if (msg) {
+      if (!banner) {
+        banner = document.createElement('div');
+        banner.className = 'jira-status-banner';
+        el.prepend(banner);
+      }
+      banner.textContent = msg;
+      banner.className = 'jira-status-banner' + (type === 'ok' ? ' jira-status-ok' : type === 'error' ? ' jira-status-error' : '');
+    } else if (banner) {
+      banner.remove();
+    }
+  }
+}
+
 async function syncJira() {
   if (jiraSyncing) return;
   jiraSyncing = true;
   updateJiraButton('Sync...', false);
+  setJiraStatus('Jira wird synchronisiert...');
   try {
-    await fetch(WRITE_SERVER + '/run-sync-jira', { method: 'POST' });
+    const resp = await fetch(WRITE_SERVER + '/run-sync-jira', { method: 'POST' });
+    if (!resp.ok) { setJiraStatus('Sync konnte nicht gestartet werden (Server-Fehler)', 'error'); updateJiraButton('Synchronisieren', true); jiraSyncing = false; return; }
     const status = await pollJiraStatus(30000, 3000);
     if (status && status.status === 'ok') {
       const [res, jtRes] = await Promise.all([fetch(v('data/jira.json')), fetch(v('data/jira_toolset.json'))]);
@@ -814,16 +960,20 @@ async function syncJira() {
       jiraSetupMode = false;
       jiraSetupHint = '';
       jiraLastSyncTs = status.ts || Date.now();
-      updateJiraButton('&#x21BB; Sync', true);
+      updateJiraButton('Synchronisieren', true);
+      setJiraStatus('Synchronisiert: ' + (status.count || '?') + ' Items', 'ok');
+      setTimeout(() => { setJiraStatus(''); if (aktiverFokusTab === 'jira') renderFokus(); }, 3000);
     } else {
       jiraSetupMode = true;
-      jiraSetupHint = 'Jira-Verbindung abgelaufen. Klicke "Setup" im Footer.';
-      updateJiraButton('&#x26A1; Setup', true);
+      jiraSetupHint = '';
+      updateJiraButton('Synchronisieren', true);
+      setJiraStatus('Token abgelaufen. Bitte in PowerShell ausfuehren: setup_jira.ps1', 'error');
     }
   } catch(e) {
     jiraSetupMode = true;
     jiraSetupHint = 'Jira-Sync fehlgeschlagen.';
-    updateJiraButton('&#x26A1; Setup', true);
+    updateJiraButton('Synchronisieren', true);
+    setJiraStatus('Sync fehlgeschlagen', 'error');
   }
   jiraSyncing = false;
   if (aktiverFokusTab === 'jira') renderFokus();
@@ -834,8 +984,11 @@ async function setupJira() {
   jiraSyncing = true;
   updateJiraButton('Login...', false);
   jiraSetupHint = '';
+  setJiraStatus('Jira Setup wird gestartet...');
+  const oldTs = jiraLastSyncTs || 0;
   try {
-    await fetch(WRITE_SERVER + '/run-setup-jira', { method: 'POST' });
+    const resp = await fetch(WRITE_SERVER + '/run-setup-jira', { method: 'POST' });
+    if (!resp.ok) { setJiraStatus('Setup konnte nicht gestartet werden', 'error'); updateJiraButton('Synchronisieren', true); jiraSyncing = false; return; }
     const deadline = Date.now() + 200000;
     let status = null;
     while (Date.now() < deadline) {
@@ -844,38 +997,42 @@ async function setupJira() {
         const res = await fetch(v('data/jira_status.json'));
         if (res.ok) status = await res.json();
       } catch(e) { continue; }
-      if (!status) continue;
+      if (!status || !status.ts || status.ts <= oldTs) continue;
       if (status.status === 'login_required') {
         jiraSetupHint = 'Bitte im Browser einloggen (SAP SSO)...';
+        setJiraStatus('Warte auf Browser-Login (SAP SSO)...');
         if (aktiverFokusTab === 'jira') renderFokus();
         continue;
       }
       if (status.status === 'ok') break;
       if (status.status === 'error' || status.status === 'timeout') break;
     }
-    if (status && status.status === 'ok') {
+    if (status && status.ts > oldTs && status.status === 'ok') {
       const [res, jtRes] = await Promise.all([fetch(v('data/jira.json')), fetch(v('data/jira_toolset.json'))]);
       if (res.ok) jiraData = await res.json();
       if (jtRes.ok) jiraToolsetData = await jtRes.json();
       jiraSetupMode = false;
       jiraSetupHint = '';
       jiraLastSyncTs = status.ts || Date.now();
-      updateJiraButton('&#x21BB; Sync', true);
+      updateJiraButton('Synchronisieren', true);
+      setJiraStatus('Setup erfolgreich, ' + (status.count || '?') + ' Items geladen', 'ok');
+      setTimeout(() => { setJiraStatus(''); if (aktiverFokusTab === 'jira') renderFokus(); }, 3000);
     } else {
       jiraSetupHint = status && status.message ? status.message : 'Setup fehlgeschlagen oder Timeout.';
-      updateJiraButton('&#x26A1; Setup', true);
+      updateJiraButton('Synchronisieren', true);
+      setJiraStatus(jiraSetupHint, 'error');
     }
   } catch(e) {
     jiraSetupHint = 'Setup-Fehler.';
-    updateJiraButton('&#x26A1; Setup', true);
+    updateJiraButton('Synchronisieren', true);
+    setJiraStatus('Setup-Fehler', 'error');
   }
   jiraSyncing = false;
   if (aktiverFokusTab === 'jira') renderFokus();
 }
 
 function handleJiraButton() {
-  if (jiraSetupMode) setupJira();
-  else syncJira();
+  syncJira();
 }
 
 function renderNews(container) {
@@ -896,6 +1053,91 @@ function renderNews(container) {
       `<div class="news-item">${escapeHtml(item)}</div>`
     ).join('') +
     (metaLabel ? `<div class="news-meta">${metaLabel}</div>` : '');
+}
+
+// ── Render Videos ──────────────────────────────────────────────────────────
+function extractYouTubeId(url) {
+  try {
+    const u = new URL(url);
+    if (u.hostname === 'youtu.be') return u.pathname.slice(1).split('/')[0];
+    if (u.hostname.includes('youtube.com')) {
+      if (u.pathname.startsWith('/embed/')) return u.pathname.split('/')[2];
+      if (u.pathname.startsWith('/shorts/')) return u.pathname.split('/')[2];
+      return u.searchParams.get('v') || '';
+    }
+  } catch(e) {}
+  return '';
+}
+
+function renderVideos(container) {
+  if (!videosData.length) {
+    container.innerHTML = '<div style="color:var(--text-muted);font-size:0.75rem;padding:8px 0">Keine Videos. Klicke + Video im Footer.</div>';
+    return;
+  }
+  const groups = {};
+  videosData.forEach(v => {
+    const cat = v.category || 'Andere';
+    if (!groups[cat]) groups[cat] = [];
+    groups[cat].push(v);
+  });
+  const catOrder = Object.keys(groups).sort((a, b) => {
+    if (a === 'Andere') return 1;
+    if (b === 'Andere') return -1;
+    return a.localeCompare(b, 'de');
+  });
+  let html = '';
+  catOrder.forEach(cat => {
+    const items = groups[cat];
+    html += `<details class="video-group" open>`;
+    html += `<summary class="wissen-section-header">${escapeHtml(cat)} (${items.length})</summary>`;
+    items.forEach(vid => {
+      const ytId = !vid.url ? vid.id : '';
+      const clickUrl = vid.url || ('https://www.youtube.com/watch?v=' + encodeURIComponent(vid.id));
+      html += `<div class="video-item">`;
+      if (ytId) {
+        const thumbUrl = 'https://img.youtube.com/vi/' + encodeURIComponent(ytId) + '/mqdefault.jpg';
+        html += `<div class="video-player-wrap" data-url="${escapeHtml(clickUrl)}">`;
+        html += `<img class="video-thumb" src="${thumbUrl}" alt="" loading="lazy" />`;
+        html += `<div class="video-play-icon">&#9654;</div>`;
+        html += `</div>`;
+      } else {
+        html += `<div class="video-link-icon" data-url="${escapeHtml(clickUrl)}" title="Im Browser oeffnen">&#127760;</div>`;
+      }
+      html += `<div class="video-info">`;
+      html += `<div class="video-title video-edit" data-id="${escapeHtml(vid.id)}" title="Bearbeiten">${escapeHtml(vid.title)}</div>`;
+      if (vid.added) html += `<div class="video-meta">${escapeHtml(vid.added)}</div>`;
+      html += `<button class="btn-ghost video-delete" data-id="${escapeHtml(vid.id)}" title="Entfernen">&#10005;</button>`;
+      html += `</div></div>`;
+    });
+    html += `</details>`;
+  });
+  container.innerHTML = html;
+  container.querySelectorAll('.video-player-wrap, .video-link-icon').forEach(el => {
+    el.addEventListener('click', function() { openExternal(this.dataset.url); });
+  });
+  container.querySelectorAll('.video-delete').forEach(btn => {
+    btn.addEventListener('click', function() {
+      const id = this.dataset.id;
+      videosData = videosData.filter(v => v.id !== id);
+      saveVideos();
+      renderFokus();
+    });
+  });
+  container.querySelectorAll('.video-edit').forEach(el => {
+    el.addEventListener('click', function() {
+      const id = this.dataset.id;
+      const vid = videosData.find(v => v.id === id);
+      if (!vid) return;
+      const modal = document.getElementById('modal-video');
+      modal.dataset.editId = id;
+      document.getElementById('new-video-url').value = vid.url || ('https://www.youtube.com/watch?v=' + vid.id);
+      document.getElementById('new-video-title').value = vid.title;
+      document.getElementById('new-video-category').value = vid.category || 'Andere';
+      modal.style.display = 'flex';
+      setModalLock();
+      document.getElementById('new-video-title').focus();
+    });
+  });
 }
 
 // ── Render Ziele ────────────────────────────────────────────────────────────
@@ -1478,6 +1720,56 @@ document.getElementById('btn-save-link').addEventListener('click', () => {
   document.getElementById('new-link-url').value = '';
 });
 
+function saveVideos() {
+  fetch(`${WRITE_SERVER}/videos.json`, {
+    method: 'PUT', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(videosData)
+  }).catch(() => {});
+}
+
+document.getElementById('btn-add-video').addEventListener('click', () => {
+  const modal = document.getElementById('modal-video');
+  delete modal.dataset.editId;
+  document.getElementById('new-video-url').value = '';
+  document.getElementById('new-video-title').value = '';
+  document.getElementById('new-video-category').value = 'Tech';
+  modal.style.display = 'flex';
+  setModalLock();
+  document.getElementById('new-video-url').focus();
+});
+
+document.getElementById('btn-save-video').addEventListener('click', () => {
+  const modal  = document.getElementById('modal-video');
+  const urlRaw = document.getElementById('new-video-url').value.trim();
+  const title  = document.getElementById('new-video-title').value.trim();
+  const cat    = document.getElementById('new-video-category').value;
+  if (!urlRaw) return;
+  try { new URL(urlRaw); } catch(e) { alert('Keine gueltige URL.'); return; }
+  const ytId = extractYouTubeId(urlRaw);
+  const entryId = ytId || urlRaw;
+  const editId = modal.dataset.editId || '';
+  if (editId) {
+    const existing = videosData.find(v => v.id === editId);
+    if (existing) {
+      existing.id = entryId;
+      if (ytId) { delete existing.url; } else { existing.url = urlRaw; }
+      existing.title = title || 'Ohne Titel';
+      existing.category = cat;
+    }
+    delete modal.dataset.editId;
+  } else {
+    if (videosData.some(v => v.id === entryId)) { alert('Bereits vorhanden.'); return; }
+    const entry = { id: entryId, title: title || 'Ohne Titel', category: cat, added: todayStr() };
+    if (!ytId) entry.url = urlRaw;
+    videosData.unshift(entry);
+  }
+  saveVideos();
+  renderFokus();
+  closeModal('modal-video');
+  document.getElementById('new-video-url').value = '';
+  document.getElementById('new-video-title').value = '';
+});
+
 document.getElementById('btn-add-notiz').addEventListener('click', () => {
   document.getElementById('modal-notiz').style.display = 'flex';
   setModalLock();
@@ -1855,6 +2147,18 @@ function escapeHtml(s) {
   return (s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
+let _toastEl = null, _toastTimer = null;
+function showToast(msg, type, durationMs) {
+  if (!_toastEl) { _toastEl = document.createElement('div'); _toastEl.className = 'toast'; document.body.appendChild(_toastEl); }
+  clearTimeout(_toastTimer);
+  _toastEl.textContent = msg;
+  _toastEl.className = 'toast' + (type === 'ok' ? ' toast-success' : type === 'error' ? ' toast-error' : '');
+  void _toastEl.offsetWidth;
+  _toastEl.classList.add('toast-visible');
+  if (durationMs) _toastTimer = setTimeout(() => _toastEl.classList.remove('toast-visible'), durationMs);
+}
+function hideToast() { if (_toastEl) _toastEl.classList.remove('toast-visible'); }
+
 function safeHref(url) {
   try { const u = new URL(url); return (u.protocol === 'http:' || u.protocol === 'https:') ? escapeHtml(url) : '#'; }
   catch { return '#'; }
@@ -2201,24 +2505,11 @@ async function updateSyncStatus() {
 
 // ── Quote refresh button ──────────────────────────────────────────────────
 document.getElementById('btn-refresh-quote').addEventListener('click', function() {
-  const btn = this;
-  btn.disabled = true;
-  btn.style.opacity = '0.4';
-  const oldTs = quoteData ? quoteData.ts : 0;
-  fetch(`${WRITE_SERVER}/run-generate-quote?force=1`, { method: 'POST' }).catch(() => {});
-  const started = Date.now();
-  const poll = async () => {
-    try {
-      const r = await fetch(v('knowledge/quotes.json'));
-      if (r.ok) {
-        const d = await r.json();
-        if (d.ts > oldTs) { quoteData = d; renderHeader(); btn.disabled = false; btn.style.opacity = ''; return; }
-      }
-    } catch(e) {}
-    if (Date.now() - started < 2 * 60000) setTimeout(poll, 5000);
-    else { btn.disabled = false; btn.style.opacity = ''; }
-  };
-  setTimeout(poll, 3000);
+  if (!quotesAll.length) return;
+  let newIdx;
+  do { newIdx = Math.floor(Math.random() * quotesAll.length); } while (newIdx === quoteIndex && quotesAll.length > 1);
+  quoteIndex = newIdx;
+  renderHeader();
 });
 
 // ── Init ───────────────────────────────────────────────────────────────────
@@ -2234,22 +2525,7 @@ fetch('data/config.json').then(r => r.json()).then(cfg => {
     fetch(`${WRITE_SERVER}/run-export-mails`, { method: 'POST' }).catch(() => {});
   }
   updateSyncStatus();
-  // Quote: auto-trigger if missing or outdated
   const todayStr = new Date().toISOString().slice(0, 10);
-  if (!quoteData || quoteData.date !== todayStr) {
-    fetch(`${WRITE_SERVER}/run-generate-quote`, { method: 'POST' }).catch(() => {});
-    const pollQuote = async () => {
-      try {
-        const r = await fetch(v('knowledge/quotes.json'));
-        if (r.ok) {
-          const d = await r.json();
-          if (d.date === todayStr) { quoteData = d; renderHeader(); return; }
-        }
-      } catch(e) {}
-      if (Date.now() - startedAt < 2 * 60000) setTimeout(pollQuote, 5000);
-    };
-    setTimeout(pollQuote, 5000);
-  }
   // News: auto-trigger if missing or outdated
   if (!newsData || newsData.date !== todayStr) {
     fetch(`${WRITE_SERVER}/run-generate-news`, { method: 'POST' }).catch(() => {});

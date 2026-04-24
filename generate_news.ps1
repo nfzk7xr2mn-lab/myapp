@@ -35,7 +35,7 @@ try {
 $headlines = [regex]::Matches($html, '<h[23][^>]*>(.*?)</h[23]>', 'Singleline') |
     ForEach-Object { $_.Groups[1].Value -replace '<[^>]+>','' -replace '&amp;','&' -replace '&nbsp;',' ' -replace '\s+',' ' } |
     Where-Object { $_.Trim().Length -gt 10 } |
-    Select-Object -First 30
+    Select-Object -First 50
 
 if (-not $headlines -or $headlines.Count -eq 0) {
     Write-Warning "Keine Schlagzeilen gefunden."
@@ -51,12 +51,12 @@ Hier sind aktuelle Good-News-Schlagzeilen von squirrel-news.net:
 
 $headlineText
 
-Fasse diese zu 3-5 kurzen, positiven Bullets zusammen. Jedes Bullet: ein passendes Emoji + Doppelpunkt + ein Satz (max 15 Woerter). Antwort NUR als JSON-Array von Strings, z.B. ["item1","item2"]. Kein Markdown, keine Erklaerung, kein Codeblock.
+Fasse diese zu 6-8 ausfuehrlichen, positiven Bullets zusammen. Jedes Bullet: ein passendes Emoji + Doppelpunkt + 2-3 Saetze die den Kern der Nachricht erklaeren (wer, was, warum es wichtig ist). Antwort NUR als JSON-Array von Strings, z.B. ["item1","item2"]. Kein Markdown, keine Erklaerung, kein Codeblock.
 "@
 
 $body = [ordered]@{
     model      = "anthropic--claude-sonnet-latest"
-    max_tokens = 512
+    max_tokens = 1024
     messages   = @(
         [ordered]@{
             role    = "user"

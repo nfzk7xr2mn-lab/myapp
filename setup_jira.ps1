@@ -28,7 +28,8 @@ Write-Status @{ status = "refreshing"; ts = [DateTimeOffset]::UtcNow.ToUnixTimeM
 
 $refreshToken = ""
 if (Test-Path $RefreshFile) {
-    $refreshToken = (Get-Content $RefreshFile -Raw).Trim()
+    $raw = Get-Content $RefreshFile -Raw
+    if ($raw) { $refreshToken = $raw.Trim() }
 }
 
 if ($refreshToken) {
@@ -72,7 +73,8 @@ $codeChallenge = $pkce.challenge
 $state         = $pkce.state
 
 $encodedScope = [uri]::EscapeDataString($Scope)
-$authUrl = "${AuthEndpoint}?response_type=code&client_id=${ClientId}&redirect_uri=${RedirectUri}&scope=${encodedScope}&state=${state}&code_challenge=${codeChallenge}&code_challenge_method=S256"
+$encodedRedirectAuth = [uri]::EscapeDataString($RedirectUri)
+$authUrl = "${AuthEndpoint}?response_type=code&client_id=${ClientId}&redirect_uri=${encodedRedirectAuth}&scope=${encodedScope}&state=${state}&code_challenge=${codeChallenge}&code_challenge_method=S256"
 
 # Write status so frontend can show "please login"
 Write-Status @{
@@ -81,8 +83,8 @@ Write-Status @{
     url    = $authUrl
 }
 
-# Open browser
-Start-Process $authUrl
+# Open browser via cmd start with quoted URL (& in URL would break unquoted)
+cmd /c "start `"`" `"$authUrl`""
 
 # Start Node.js callback listener (3 min timeout)
 Write-Host "Waiting for browser callback on port 41562..."
@@ -102,7 +104,7 @@ const server = http.createServer((req, res) => {
     res.writeHead(200, {'Content-Type': 'text/html'});
     res.end('<html><body><h2>Login erfolgreich. Du kannst diesen Tab schliessen.</h2></body></html>');
     fs.writeFileSync(outFile, JSON.stringify({code: code, state: st}));
-    server.close();
+    server.close(() => { process.exit(0); });
   } else {
     res.writeHead(404); res.end('Not found');
   }
@@ -119,7 +121,7 @@ $listenerFile = [System.IO.Path]::GetTempFileName() + ".js"
 [System.IO.File]::WriteAllText($listenerFile, $listenerCode, $utf8)
 
 try {
-    & $NodeExe $listenerFile $state $callbackFile 2>&1 | Out-Null
+    & $NodeExe $listenerFile $state $callbackFile 2>&1 | ForEach-Object { Write-Host $_ }
 } catch {
     Write-Host "Listener error: $_"
 }
@@ -158,21 +160,40 @@ if (-not $code) {
 # ── 3. Exchange code for tokens ──────────────────────────────────────────────
 
 Write-Host "Exchanging code for token..."
+Write-Host "  code: $($code.Substring(0, [Math]::Min(10, $code.Length)))..."
+Write-Host "  redirect_uri: $RedirectUri"
+Write-Host "  verifier length: $($codeVerifier.Length)"
 Write-Status @{ status = "exchanging"; ts = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() }
 
 try {
-    $tokenBody = "grant_type=authorization_code&code=${code}&client_id=${ClientId}&redirect_uri=${RedirectUri}&code_verifier=${codeVerifier}"
-    $tokenResp = Invoke-RestMethod -Uri $TokenEndpoint -Method Post `
+    $tokenBodyHash = @{
+        grant_type    = "authorization_code"
+        code          = $code
+        client_id     = $ClientId
+        redirect_uri  = $RedirectUri
+        code_verifier = $codeVerifier
+    }
+    $rawResp = Invoke-WebRequest -Uri $TokenEndpoint -Method Post `
         -ContentType "application/x-www-form-urlencoded" `
-        -Body $tokenBody -TimeoutSec 15
+        -Body $tokenBodyHash -TimeoutSec 15 -UseBasicParsing
+    Write-Host "  Response status: $($rawResp.StatusCode)"
+    $tokenResp = $rawResp.Content | ConvertFrom-Json
 } catch {
     Write-Host "Token exchange failed: $_"
+    if ($_.Exception.Response) {
+        try {
+            $sr = [System.IO.StreamReader]::new($_.Exception.Response.GetResponseStream())
+            Write-Host "  Response body: $($sr.ReadToEnd())"
+            $sr.Close()
+        } catch {}
+    }
     Write-Status @{ status = "error"; ts = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds(); message = "Token exchange failed" }
     exit 1
 }
 
 if (-not $tokenResp.access_token) {
     Write-Host "No access token in response."
+    Write-Host "  Response keys: $($tokenResp.PSObject.Properties.Name -join ', ')"
     Write-Status @{ status = "error"; ts = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds(); message = "No access token" }
     exit 1
 }
@@ -180,7 +201,9 @@ if (-not $tokenResp.access_token) {
 # Save refresh token
 if ($tokenResp.refresh_token) {
     [System.IO.File]::WriteAllText($RefreshFile, $tokenResp.refresh_token, $utf8)
-    Write-Host "Refresh token saved."
+    Write-Host "Refresh token saved ($($tokenResp.refresh_token.Length) chars)."
+} else {
+    Write-Host "WARNING: No refresh token in response!"
 }
 
 # ── 4. Run sync ──────────────────────────────────────────────────────────────

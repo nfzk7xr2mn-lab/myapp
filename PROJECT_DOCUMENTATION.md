@@ -1,6 +1,6 @@
 # Your Day. Your Direction. Your Decisions.
 
-Project Documentation. As of: April 23, 2026.
+Project Documentation. As of: April 24, 2026.
 
 ---
 
@@ -36,7 +36,7 @@ C:\Users\D025095\myapp\myapp\
 +-- plan_week.ps1                         # AI day rating -> data/notes.json
 +-- sync_jira.ps1                         # Jira items -> data/jira.json
 +-- setup_jira.ps1                        # Jira OAuth setup (PKCE + browser login)
-+-- generate_quote.ps1                    # AI daily quote -> knowledge/quotes.json
++-- generate_quote.ps1                    # (deprecated) AI daily quote, replaced by quotes_366.json
 +-- generate_news.ps1                     # AI daily news -> knowledge/news.json
 |
 +-- data/                                 # Generated, not committed
@@ -49,7 +49,7 @@ C:\Users\D025095\myapp\myapp\
 +-- knowledge/                            # Curated, not committed
     +-- audiobooks.json, survivors.json, performance.json
     +-- links.json, learningplan.json, learningplan_progress.json
-    +-- sport.json, quotes.json, news.json, goals.json
+    +-- sport.json, quotes_366.json, news.json, goals.json, videos.json
 ```
 
 ---
@@ -73,7 +73,7 @@ Narrow bar (56px) at the bottom of the screen. No emoji, text only.
 
 ### Expert Mode
 
-Full 4-tile view (Data, Instructions, Actions, Mails). No tile emojis. Header with daily quote (italic gold), quote refresh, server status dot, mode button.
+Full 4-tile view (Data, Instructions, Actions, Mails). No tile emojis. Header with daily quote from 366 static quotes (index = day of year), quote refresh (random, no server call), server status dot, mode button.
 
 ### Focus Mode
 
@@ -113,7 +113,7 @@ Tiles: semi-transparent + `backdrop-filter: blur(20px)`, gold border.
 
 ---
 
-## 5. Instructions Tile (7 Tabs)
+## 5. Instructions Tile (8 Tabs)
 
 Default tab by time of day: before 8 -> Knowledge, 8-17 -> Notes, after 17 -> Knowledge.
 
@@ -157,18 +157,33 @@ Data format:
 
 ### Jira
 - Two trees: **"Meine"** (personally assigned items, grouped by project, open by default) + **"SL Toolset for Cloud"** (toolset items, grouped by release, collapsed by default).
-- All items as compact pill buttons color-coded by status. "Meine" shows shortened Jira key (CLMSLORCHESTRATOR -> SLOCON, CLMSLCCI4ABAP -> CLOUDLM), toolset shows category-number (e.g. "RAMP-2859"). Summary + status as tooltip.
-- Toolset items have `releases` and `category` fields in `data/jira.json`. Categories: SLV (HECSPCVAL), REGR (CLMOQHEC single-release), RAMP (CLMCONSUMABILITY / CLMOQHEC multi-release).
+- **Monochrome Gold/Gray color scheme**: All pill buttons in gold and gray tones. Only color accents are small dots: green (#2ecc71) for successful, pink (#e84393) for failed/cancelled.
+- "Meine" shows shortened Jira key (CLMSLORCHESTRATOR -> SLOCON, CLMSLCCI4ABAP -> CLOUDLM). Toolset shows only item number (e.g. "2859") since the category is displayed per row.
+- Personal items include both open and closed items from release-relevant projects (with fixVersion or release number in summary).
+- **Status rendering**: In Progress = italic/gold background, Done/Completed/Finished = gray + strikethrough + green dot, Cancelled/Stopped = gray + strikethrough + pink dot, Inactive = strikethrough, Blocked/On Hold = gold tint.
+- Toolset items have `releases` and `category` fields in `data/jira.json`. Categories: SLV (HECSPCVAL), REGR (CLMOQHEC), RAMP (CLMCONSUMABILITY / CLMOQHEC). Category preferably derived from Jira labels (Regression -> REGR, Ramp-up -> RAMP), fallback to project+release count.
+- **Release headers**: Compact with REGR/SLV stats (e.g. "5/2"), no RAMP count. Green dot only when all REGR+SLV items are done with no failures.
+- **Completed releases** collapsed by default, dimmed (opacity 0.65), with separator lines between releases.
+- Category labels as subtle badges with `data-cat` attribute (REGR/RAMP/SLV).
+- `data/jira_toolset.json` is completely rewritten on each sync (toolset items only).
 - Items with multiple releases appear under each release.
-- Releases sorted descending (newest on top), categories: REGR > RAMP > SLV. Items within sorted by status: Running/In Progress > On Hold > Open/To Do > Planned.
-- Status colors: In Progress/Running (blue), Blocked (red), On Hold (orange), Open/Planned/To Do (gray), Done (green). No priority colors.
+- Releases sorted descending (newest on top), categories: REGR > RAMP > SLV.
 - Click on pill opens Jira in system browser (`openExternal()` via `/open-url`).
-- Smart Sync/Setup button: polls `jira_status.json`, switches to setup on token error.
+- Smart Sync/Setup button: polls `jira_status.json`, waits for a new timestamp (not old status). Switches to setup on token error.
 - Last sync timestamp shown below (always date + time).
 - Auth: OAuth 2.0 via SAP MCP proxy.
 
+### Videos
+- Video and lecture link collection from `knowledge/videos.json`, grouped by category (Tech, Leadership, Wissenschaft, Inspiration, Lernen, Andere).
+- Collapsible sections per category, newest entries on top.
+- Two types: YouTube videos (thumbnail with play icon) and external links (globe icon). Both open in system browser via `openExternal()`.
+- Add via `+ Video` modal: URL (YouTube or any website), title, category (dropdown). Editable by clicking the title.
+- Remove via X button on entry.
+- YouTube ID auto-extracted from `youtube.com/watch?v=`, `youtu.be/`, `/embed/`, `/shorts/` URLs.
+- Data format: `[{"id":"...","title":"...","category":"...","added":"YYYY-MM-DD"}]` for YouTube, plus `"url":"..."` for external links.
+
 ### News
-- Positive news from squirrel-news.net, summarized via Claude API into 3-5 emoji bullets.
+- Positive news from squirrel-news.net, summarized via Claude API into 6-8 detailed emoji bullets (2-3 sentences each).
 - Auto-trigger on app start when outdated. Refresh button in footer.
 - Timestamp below (same format as Jira).
 
@@ -210,14 +225,13 @@ Node.js on `127.0.0.1:9001`. PowerShell path hardcoded (`C:\Windows\System32\Win
 | POST | `/run-summarize` | Spawn AI summary |
 | POST | `/run-export-calendar` | Spawn calendar export |
 | POST | `/run-plan-week` | Day rating (execFile, 8 min timeout) |
-| POST | `/run-generate-quote[?force=1]` | Spawn daily quote |
 | POST | `/run-generate-news[?force=1]` | Spawn daily news |
 | POST | `/run-sync-jira` | Jira sync (execFile, 60s) |
 | POST | `/run-setup-jira` | Jira setup (execFile, 210s) |
 | POST | `/open-url` | Open URL in system browser (protocol check) |
 | PUT | `/{file}` | Write file (allowlist) |
 
-**PUT Allowlist:** `data/` -> actions, notes, contacts, jira, jira_status. `knowledge/` -> links, learningplan_progress, sport, quotes, news.
+**PUT Allowlist:** `data/` -> actions, notes, contacts, jira, jira_status. `knowledge/` -> links, learningplan_progress, sport, quotes, news, videos.
 
 ---
 
@@ -241,17 +255,20 @@ Claude API via corporate proxy -> `summary_KW{n}.json`.
 ### plan_week.ps1
 Daily at 6 PM + on-demand. 5 separate API calls (MON-FRI). Emoji + one sentence per day. Skips when `modal.lock` exists.
 
-### generate_quote.ps1
-Quote from classical German literature via Claude API. `-force` for regeneration.
+### generate_quote.ps1 (deprecated)
+Replaced by static `knowledge/quotes_366.json` (366 quotes, index = day of year). File kept as backup. Sources: Nobel laureates, German philosophers, literature classics.
 
 ### generate_news.ps1
-squirrel-news.net -> Claude API -> 3-5 emoji bullets. JSON built manually (ConvertTo-Json bug). `-force` for regeneration.
+squirrel-news.net -> Claude API -> 6-8 detailed emoji bullets (2-3 sentences each). JSON built manually (ConvertTo-Json bug). `-force` for regeneration.
 
 ### sync_jira.ps1
-Two JQL queries: (1) personal items (`assignee = user`), (2) toolset items (`project in (CLMCONSUMABILITY, CLMOQHEC, HECSPCVAL)` with `fixVersion`). Release numbers extracted from `fix_versions` (e.g. "SL Toolset for Cloud 2604 (T2026.15)" -> "2604"). Category auto-derived: HECSPCVAL -> SLV, CLMOQHEC single-release -> REGR, CLMOQHEC multi-release / CLMCONSUMABILITY -> RAMP. Manually set `category` is preserved. OAuth token refresh. UTF-8 without BOM. Manual JSON build (ConvertTo-Json bug).
+Three query phases: (1) personal items (`assignee = user, updated >= 2025-10-01`), (2) personal scope items via monthly time windows (Oct 2025 - Apr 2026+, no project filter, max 50 items each), (3) toolset items (`project in (CLMCONSUMABILITY, CLMOQHEC, HECSPCVAL)` with time-window split). Personal items: closed ones only kept if from toolset projects (CLMOQHEC/HECSPCVAL/CLMCONSUMABILITY). Scope items (`personal: true`): across all projects, kept if release or category present. MCP proxy has 50-item server limit, hence monthly windows. Release numbers preferably extracted from `fix_versions` (e.g. "SL Toolset for Cloud 2604" -> "2604"), fallback to 4-digit numbers in the summary. Category auto-derived: HECSPCVAL -> SLV, CLMOQHEC single-release -> REGR, multi-release / CLMCONSUMABILITY -> RAMP. Manually set `category` is preserved. `Invoke-ToolsetQuery` function (defined before section 3b) is shared by both phases. OAuth token refresh. UTF-8 without BOM. Manual JSON build with `Escape-JsonString()`.
 
 ### setup_jira.ps1
-PKCE flow with browser login (SAP SSO). Callback on port 41562. Status messages in `jira_status.json`.
+PKCE flow with browser login (SAP SSO). Callback on port 41562. Status messages in `jira_status.json`. Null-safe token read (`$raw = Get-Content ... -Raw; if ($raw) { ... }`). Browser opening via `cmd /c start`.
+
+### start-servers.ps1 / start-dashboard.bat
+Stops old processes on ports 5500+9001, closes old Chrome dashboard window (only `--app=http://127.0.0.1:5500`, not other Chrome windows), then starts write-server, live-server, and Chrome app mode. `start-dashboard.bat` is the single entry point.
 
 ### setup.ps1
 One-time setup: checks prerequisites, registers 11 scheduled tasks, creates shortcuts.
@@ -275,7 +292,8 @@ One-time setup: checks prerequisites, registers 11 scheduled tasks, creates shor
 | Server Health | 5 min |
 | ICS + Mails reload | 30 min |
 | Mail Export at start | only 07-13 |
-| Daily quote / News | at start when outdated |
+| Daily quote | Static, index = day of year (366 quotes) |
+| News | at start when outdated |
 
 All periodic refreshes protected by `isAnyModalOpen()`.
 
@@ -283,7 +301,7 @@ All periodic refreshes protected by `isAnyModalOpen()`.
 
 ## 11. Modals
 
-`modal-action` (action), `modal-notiz` (note), `modal-link` (link), `modal-sync` (sync mails), `modal-netzwerk` (edit contact), `modal-add-contact` (new contact). Lock file: `C:\Temp\myapp-modal.lock` (not in `data/` -- live-server would trigger reload).
+`modal-action` (action), `modal-notiz` (note), `modal-link` (link), `modal-sync` (sync mails), `modal-netzwerk` (edit contact), `modal-add-contact` (new contact), `modal-video` (new video). Lock file: `C:\Temp\myapp-modal.lock` (not in `data/` -- live-server would trigger reload).
 
 ---
 
@@ -291,10 +309,13 @@ All periodic refreshes protected by `isAnyModalOpen()`.
 
 - **Secrets**: Only in `secrets.ps1` (not committed). `.gitignore` with `# PRIVACY`.
 - **XSS**: All user data via `escapeHtml()` (incl. `"` for attribute contexts). `safeHref()` blocks `javascript:` URLs. `linkify()` uses `safeHref()` + `rel="noopener noreferrer"`.
-- **Write Server**: Allowlist for PUT, localhost only, CORS restricted to `127.0.0.1:5500`, 10 MB body limit.
+- **Write Server**: Allowlist for PUT, localhost only, CORS restricted to `127.0.0.1:5500`, 10 MB body limit. Rate-limiting on all spawn endpoints (30-60s cooldown per endpoint).
 - **URL Opening**: `/open-url` checks protocol (`http:`/`https:`) via `new URL()`, opens via `explorer.exe`.
 - **Names**: `shortName()` (first name + first letter of last name). Frequency counts never displayed.
 - **Calendar**: No inline `onclick` with user data -- `data-*` attributes + `addEventListener`.
+- **JSON Escaping**: `Escape-JsonString()` in sync_jira.ps1 handles backslashes, quotes, newlines, tabs and control characters for all manually built JSON fields.
+- **URL Construction**: Jira issue keys escaped via `[Uri]::EscapeDataString()` in URL building.
+- **Token Storage**: Refresh token stored as plaintext in `~/.claude/sap-jira-refresh-token.sh`.
 
 ---
 

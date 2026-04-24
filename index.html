@@ -6,7 +6,7 @@
   <title>Dein Tag. Deine Richtung. Deine Entscheidungen.</title>
   <link rel="icon" type="image/png" sizes="32x32" href="data/favicon-32.png" />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="style.css" />
+  <link rel="stylesheet" href="style.css?v=20260424ak" />
 </head>
 <body>
   <div id="app">
@@ -19,7 +19,7 @@
         <div id="date-label"></div>
       </div>
       <div id="phase-badge"></div>
-      <div style="display:flex;align-items:center;gap:8px;margin-left:auto">
+      <div id="header-right">
         <div id="header-quote"></div>
         <button id="btn-refresh-quote" class="btn-mode" title="Neues Zitat">⟳</button>
         <div id="server-status" title="write-server"></div>
@@ -53,10 +53,10 @@
         <div class="tile-footer"><button class="btn-ghost" id="btn-refresh-cal-expert" title="Kalender aus Outlook neu exportieren">⟳ Aktualisieren</button></div>
       </section>
 
-      <!-- TILE 2: INSTRUKTIONEN -->
+      <!-- TILE 2: INFO -->
       <section class="tile" id="tile-fokus">
         <div class="tile-header">
-          <span class="tile-title">Instruktionen</span>
+          <span class="tile-title">Info</span>
           <span class="tile-sub" id="fokus-kategorie"></span>
         </div>
         <div class="fokus-tabs">
@@ -66,6 +66,7 @@
           <button class="fokus-tab" data-tab="netzwerk" onclick="switchFokusTab('netzwerk')">Netzwerk</button>
           <button class="fokus-tab" data-tab="ziele"    onclick="switchFokusTab('ziele')">Ziele</button>
           <button class="fokus-tab" data-tab="wissen"   onclick="switchFokusTab('wissen')">Wissen</button>
+          <button class="fokus-tab" data-tab="videos"   onclick="switchFokusTab('videos')">Videos</button>
           <button class="fokus-tab" data-tab="news"     onclick="switchFokusTab('news')">Neues</button>
         </div>
         <div class="tile-body" id="fokus-body"></div>
@@ -77,6 +78,7 @@
           <button class="btn-ghost" id="btn-sync-jira" style="display:none">⟳ Synchronisieren</button>
           <button class="btn-ghost" id="btn-refresh-ziele" style="display:none">⟳ Aktualisieren</button>
           <button class="btn-ghost" id="btn-refresh-news" style="display:none">⟳ Aktualisieren</button>
+          <button class="btn-ghost" id="btn-add-video" style="display:none">+ Video</button>
           <button class="btn-ghost" id="btn-fokus-placeholder" style="border-color:transparent;color:transparent">&nbsp;</button>
         </div>
       </section>
@@ -195,6 +197,27 @@
     </div>
   </div>
 
-  <script src="script.js"></script>
+  <!-- MODAL: Neues Video -->
+  <div class="modal-overlay" id="modal-video" style="display:none" onclick="if(event.target===this)closeModal('modal-video')">
+    <div class="modal">
+      <div class="modal-title">Neues Video</div>
+      <input class="modal-input" id="new-video-url" placeholder="URL (YouTube oder Webseite)..." />
+      <input class="modal-input" id="new-video-title" placeholder="Titel..." />
+      <select class="modal-input" id="new-video-category">
+        <option value="Tech">Tech</option>
+        <option value="Leadership">Leadership</option>
+        <option value="Wissenschaft">Wissenschaft</option>
+        <option value="Inspiration">Inspiration</option>
+        <option value="Lernen">Lernen</option>
+        <option value="Andere">Andere</option>
+      </select>
+      <div class="modal-buttons">
+        <button class="btn-primary" id="btn-save-video">Speichern</button>
+        <button class="btn-ghost" onclick="closeModal('modal-video')">Abbrechen</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="script.js?v=20260424ah"></script>
 </body>
 </html>

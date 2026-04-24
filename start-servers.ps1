@@ -22,6 +22,15 @@ foreach ($p in @(9001, 5500)) {
         Write-Host "Prozess auf Port $p gestoppt (PID $procId)" -ForegroundColor Yellow
     }
 }
+
+# Close old Chrome app window (only the dashboard, not other Chrome windows)
+Get-Process chrome -ErrorAction SilentlyContinue |
+    Where-Object {
+        try {
+            $wmi = Get-CimInstance Win32_Process -Filter "ProcessId=$($_.Id)" -ErrorAction SilentlyContinue
+            $wmi.CommandLine -like '*--app=http://127.0.0.1:5500*'
+        } catch { $false }
+    } | Stop-Process -Force -ErrorAction SilentlyContinue
 Start-Sleep -Milliseconds 1000
 
 # Write server (Node.js, port 9001)
